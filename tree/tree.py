@@ -137,6 +137,7 @@ class Tree:
                 gamma_factor *= 0.99
 
 class Node:
+    # Makingnew commit
     def __init__(self, board, parent_edge=None):
 
         self.state= board.fen()  # The chess fen string object representing this state
