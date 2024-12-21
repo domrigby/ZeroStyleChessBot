@@ -72,7 +72,10 @@ class Tree:
         if current_node is None:
             current_node = self.root
 
-        # Preallocated the memory
+        # Preallocate the memory
+        self.nodes = Queue()
+        for _ in range(number_of_expansions):
+            self.nodes.put(Node())
 
         def search_down_tree(board, thread_num_expansions: int, current_node, thread_num: int = 0):
 
@@ -84,7 +87,6 @@ class Tree:
                 # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
                 edge = current_node.puct(thread_num, rng_generator=thread_rng)
                 visited_edges: List[Edge] = [edge]
-                leaf = False
 
                 while edge.child_node and not current_node.branch_complete:
 
@@ -100,7 +102,7 @@ class Tree:
                     edge = current_node.puct(rng_generator=thread_rng)
 
                 board.set_fen(current_node.state)
-                current_node, reward, done = edge.expand(board)
+                current_node, reward, done = edge.expand(board, self.nodes)
                 self.backpropagation(visited_edges, reward)
 
                 # TODO: change this so it doesnt lock the whole of self.nodes
@@ -117,8 +119,6 @@ class Tree:
                                        current_node, thread_num)
                        for thread_num, board in enumerate(self.envs)]
 
-            for futures in futures:
-                futures.result()
 
     def backpropagation(self, visited_edges, observed_reward: float):
 
@@ -137,8 +137,22 @@ class Tree:
                 gamma_factor *= 0.99
 
 class Node:
-    # Makingnew commit
-    def __init__(self, board, parent_edge=None):
+    def __init__(self, board=None, parent_edge=None):
+        if board is not None:
+           self.re_init(board, parent_edge)
+        else:
+            # Initialise empty forms of the class
+            self.state: board.fen = None  # The chess fen string object representing this state
+            self.parent_edge: Edge = None
+
+            self.number_legal_moves: int = 0
+            self.branch_complete = False  # Flag to indicate if the branch has been fully searched
+
+            self.edges: List[Edge] = [] #[Edge() for _ in range(16)]
+
+            self.has_policy = False
+
+    def re_init(self, board=None, parent_edge=None):
 
         self.state= board.fen()  # The chess fen string object representing this state
         self.parent_edge = parent_edge  # Reference to the parent edge
@@ -154,10 +168,13 @@ class Node:
             self.branch_complete = False
 
         self.edges= [Edge(self, move) for move in legal_moves]
+        # for idx, move in enumerate(legal_moves):
+        #     self.edges[idx].re_init(self, move)
 
         self.has_policy = False
 
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
+
         # Do all puct stuff in one go so that other threads cant edit it whilst
         # visits = np.sum([edge.N for edge in self.edges])
         # return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * np.sqrt(visits + 1) / (edge.N + 1)))
@@ -188,12 +205,14 @@ class Node:
 
 class Edge:
 
-    def __init__(self, parent_node, move):
-        # Corresponding move
-        self.move = move
+    def __init__(self, parent_node: Node = None, move=None):
 
-        # Tree connections
-        self.parent_node = parent_node
+        if parent_node is not None and move is not None:
+            self.re_init(parent_node, move)
+        else:
+            self.parent_node: Node = None
+            self.move = None
+
         self.child_node = None
 
         # Game statistics
@@ -204,8 +223,13 @@ class Edge:
         self.virtual_loss = 0
         self.lock = threading.Lock()
 
+    def re_init(self, parent_node, move):
+        self.parent_node = parent_node
+        self.move = move
+
+
     @profile
-    def expand(self, board: chess.Board):
+    def expand(self, board: chess.Board, node_queue: Queue = None):
 
         # Check if the move is a capture (not a pawn move)
         capture = board.is_capture(self.move)
@@ -214,7 +238,11 @@ class Edge:
         board.push(self.move)
 
         # Create a new child node
-        self.child_node = Node(board, parent_edge=self)
+        if node_queue is not None:
+            self.child_node = node_queue.get()
+            self.child_node.re_init(board, parent_edge=self)
+        else:  # If no queue provided, create a new node directly
+            self.child_node = Node(board, parent_edge=self)
 
         # Check if done
         done = board.is_game_over()
@@ -248,15 +276,15 @@ start_time = time.time()
 tree.parallel_search(number_of_expansions=50000)
 end_time = time.time()
 
-# print(f"Time with parallel search {end_time-start_time:.3f} Nodes: {len(tree.nodes)}")
+print(f"Time with parallel search {end_time-start_time:.3f}")
 # print([edge.N for edge in tree.root.edges])
 
-# tree = Tree(chess.Board)
-# start_time = time.time()
-# tree.search_down_tree(50000)
-# end_time = time.time()
+tree = Tree(chess.Board)
+start_time = time.time()
+tree.search_down_tree(50000)
+end_time = time.time()
 
-print(f"Time with no parallel search {end_time-start_time:.3f} Nodes: {len(tree.nodes)}")
+print(f"Time with no parallel search {end_time-start_time:.3f}")
 
 print([edge.Q for edge in tree.root.edges])
 
