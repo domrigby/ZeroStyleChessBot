@@ -2,6 +2,10 @@ import chess
 import numpy as np
 from numpy.random import default_rng
 
+# You need to build the C++ bit first
+import os
+import chess_moves
+
 from copy import copy
 
 import threading
@@ -9,7 +13,7 @@ from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 
 from typing import List
-import os
+
 from line_profiler import profile
 
 import gc
@@ -166,7 +170,7 @@ class Node:
         self.state= board.fen()  # The chess fen string object representing this state
         self.parent_edge = parent_edge  # Reference to the parent edge
 
-        legal_moves = board.legal_moves
+        legal_moves = chess_moves.get_legal_moves(self.state)
 
         self.number_legal_moves = len(list(legal_moves))
 
