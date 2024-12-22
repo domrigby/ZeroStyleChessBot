@@ -22,10 +22,10 @@ class Tree:
             env_kwargs = {}
 
         # Create a set of game environments for each thread
-        self.envs = [env(**env_kwargs) for _ in range(num_threads)]
+        self.env = env
 
         # Create the root node of the tree
-        self.root = Node(self.envs[0])
+        self.root = Node(self.env())
         self.nodes: List[Node] = []
 
         # Create the queues
@@ -77,10 +77,13 @@ class Tree:
         for _ in range(number_of_expansions):
             self.nodes.put(Node())
 
-        def search_down_tree(board, thread_num_expansions: int, current_node, thread_num: int = 0):
+        def search_down_tree(env, thread_num_expansions: int, current_node, thread_num: int = 0):
 
             # Sharaing a radndom number generator SEVERELY slows down the process... explainationn pending
             thread_rng = default_rng()
+
+            # Initialise the threads env
+            thread_env = env()
 
             for idx in range(thread_num_expansions):
 
@@ -90,34 +93,33 @@ class Tree:
 
                 while edge.child_node and not current_node.branch_complete:
 
+                    # Append edge to visited list
                     visited_edges.append(edge)
 
                     with edge.lock:
                         # Tunes PUCT such that other threads won't follow it
                         edge.virtual_loss = -10.
 
+                    # Get new node and then a new edge
                     current_node = edge.child_node
 
-                    # Get new edge
-                    edge = current_node.puct(rng_generator=thread_rng)
+                    if not current_node.branch_complete:
+                        edge = current_node.puct(rng_generator=thread_rng)
 
-                board.set_fen(current_node.state)
-                current_node, reward, done = edge.expand(board, self.nodes)
+                thread_env.set_fen(current_node.state)
+                current_node, reward, done = edge.expand(thread_env, self.nodes)
                 self.backpropagation(visited_edges, reward)
 
-                # TODO: change this so it doesnt lock the whole of self.nodes
-                # with self.lock:
-                #     # Write to the nodes
-                #     self.nodes.append(current_node)
-
-                # Reset the top level node
                 current_node = self.root
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
 
-            futures = [executor.submit(search_down_tree, board, number_of_expansions//self.num_workers,
+            futures = [executor.submit(search_down_tree, self.env, number_of_expansions//self.num_workers,
                                        current_node, thread_num)
-                       for thread_num, board in enumerate(self.envs)]
+                       for thread_num in range(self.num_workers)]
+
+            for future in futures:
+                future.result()
 
 
     def backpropagation(self, visited_edges, observed_reward: float):
@@ -137,9 +139,16 @@ class Tree:
                 gamma_factor *= 0.99
 
 class Node:
+
+    DEFAULT_EDGE_NUM = 24
     def __init__(self, board=None, parent_edge=None):
+
+        self.lock = threading.Lock()
+
         if board is not None:
-           self.re_init(board, parent_edge)
+            # TODO: sort out edge initialisation
+            self.edges: List[Edge] = []
+            self.re_init(board, parent_edge)
         else:
             # Initialise empty forms of the class
             self.state: board.fen = None  # The chess fen string object representing this state
@@ -148,7 +157,7 @@ class Node:
             self.number_legal_moves: int = 0
             self.branch_complete = False  # Flag to indicate if the branch has been fully searched
 
-            self.edges: List[Edge] = [] #[Edge() for _ in range(16)]
+            self.edges: List[Edge] = [Edge() for _ in range(self.DEFAULT_EDGE_NUM)]
 
             self.has_policy = False
 
@@ -167,26 +176,35 @@ class Node:
         else:
             self.branch_complete = False
 
-        self.edges= [Edge(self, move) for move in legal_moves]
-        # for idx, move in enumerate(legal_moves):
-        #     self.edges[idx].re_init(self, move)
+        created_edge_num = len(self.edges)
+        for idx, move in enumerate(legal_moves):
+            if idx < created_edge_num:
+                self.edges[idx].re_init(self, move)
+            else:
+                self.edges.append(Edge(self, move))
 
         self.has_policy = False
 
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
 
+        #TODO sort puct out with the locks
         # Do all puct stuff in one go so that other threads cant edit it whilst
         # visits = np.sum([edge.N for edge in self.edges])
         # return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * np.sqrt(visits + 1) / (edge.N + 1)))
 
-        Qs = np.array([edge.Q - edge.virtual_loss for edge in self.edges])
-        Ns = np.array([edge.N for edge in self.edges])
+        used_edges = [edge for edge in self.edges if edge.move is not None]
+
+        Qs = np.array([edge.Q + edge.virtual_loss for edge in used_edges])
+        Ns = np.array([edge.N for edge in used_edges])
 
         # PUCT calculation
         puct_vals = Qs + 5.0 * np.sqrt(np.sum(Ns)) / (1 + Ns)
 
+        if len(puct_vals) == 0:
+            print(self.number_legal_moves)
+
         # Choose the child node with the highest PUCT value
-        max_indices = np.where(puct_vals== np.max(puct_vals))[0]
+        max_indices = np.where(puct_vals == np.max(puct_vals))[0]
 
         # Randomly choose one of the indices
         if draw_num is None:
@@ -200,7 +218,7 @@ class Node:
             draw_num = draw_num % len(max_indices)
             winner_index = max_indices[draw_num]
 
-        return self.edges[winner_index]
+        return used_edges[winner_index]
 
 
 class Edge:
@@ -226,7 +244,6 @@ class Edge:
     def re_init(self, parent_node, move):
         self.parent_node = parent_node
         self.move = move
-
 
     @profile
     def expand(self, board: chess.Board, node_queue: Queue = None):
@@ -265,35 +282,37 @@ class Edge:
         Q =  self.W / self.N if self.N > 0 else 0.
         return Q
 
-
-
 #
-tree = Tree(chess.Board)
+if __name__ == '__main__':
+    tree = Tree(chess.Board)
 
+    sims = 25000
 
-import time
-start_time = time.time()
-tree.parallel_search(number_of_expansions=50000)
-end_time = time.time()
+    import time
+    start_time = time.time()
+    tree.parallel_search(number_of_expansions=sims)
+    end_time = time.time()
 
-print(f"Time with parallel search {end_time-start_time:.3f}")
-# print([edge.N for edge in tree.root.edges])
+    print(f"Time with parallel search {end_time-start_time:.3f}")
+    print([edge.N for edge in tree.root.edges])
 
-tree = Tree(chess.Board)
-start_time = time.time()
-tree.search_down_tree(50000)
-end_time = time.time()
+    # tree = Tree(chess.Board)
+    # start_time = time.time()
+    # tree.search_down_tree(sims)
+    # end_time = time.time()
+    # #
+    # print(f"Time with no parallel search {end_time-start_time:.3f}")
 
-print(f"Time with no parallel search {end_time-start_time:.3f}")
+    print([edge.Q for edge in tree.root.edges])
 
-print([edge.Q for edge in tree.root.edges])
+    best_moves = sorted(tree.root.edges, key= lambda x: x.Q, reverse=True)
 
-best_moves = sorted(tree.root.edges, key= lambda x: x.Q, reverse=True)
+    # Create the root of the tree
+    initial_board = chess.Board()
 
-# # Create the root of the tree
-# initial_board = chess.Board()
-#
-# for move in best_moves:
-#     initial_board.reset_board()
-#     initial_board.push(move.move)
-#     print(initial_board, "\n")
+    # for move in best_moves:
+    #     initial_board.reset_board()
+    #     initial_board.push(move.move)
+    #     print(initial_board, "\n")
+
+    print("here")

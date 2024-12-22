@@ -1,109 +1,99 @@
+/* Include necessary headers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <ctype.h>
 
+/* Define constants for the board */
 #define BOARD_SIZE 64
+#define MOVE_BUFFER_SIZE 16
 
-// Piece constants
-#define EMPTY '.'
-#define PAWN 'P'
-#define KNIGHT 'N'
-#define BISHOP 'B'
-#define ROOK 'R'
-#define QUEEN 'Q'
-#define KING 'K'
+/* Helper function to parse the FEN and initialize the board */
+void parse_fen(const char* fen, char board[8][8]) {
+    int row = 0, col = 0;
 
-// Side to move constants
-#define WHITE 0
-#define BLACK 1
+    for (int i = 0; fen[i] != ' ' && fen[i] != '\0'; i++) {
+        char c = fen[i];
 
-// Algebraic notation for board squares
-const char *square_to_algebraic(int square) {
-    static char notation[3];
-    notation[0] = 'a' + (square % 8);
-    notation[1] = '8' - (square / 8);
-    notation[2] = '\0';
-    return notation;
+        if (c == '/') {
+            row++;
+            col = 0;
+        } else if (c >= '1' && c <= '8') {
+            int empty_squares = c - '0';
+            for (int j = 0; j < empty_squares; j++) {
+                board[row][col++] = '.'; // Use '.' to represent empty squares
+            }
+        } else {
+            board[row][col++] = c;
+        }
+    }
 }
 
-typedef struct {
-    char board[BOARD_SIZE];
-    int side_to_move; // WHITE or BLACK
-} ChessState;
+/* Function to generate pseudo-legal moves for pawns */
+void generate_pawn_moves(char board[8][8], int row, int col, char** moves, int* move_count, char color) {
+    int direction = (color == 'w') ? -1 : 1;
 
-// Converts a FEN string to a ChessState
-int load_fen(const char *fen, ChessState *state) {
-    memset(state->board, EMPTY, BOARD_SIZE);
-    state->side_to_move = WHITE;
+    if (row + direction >= 0 && row + direction < 8 && board[row + direction][col] == '.') {
+        char move[MOVE_BUFFER_SIZE];
+        snprintf(move, MOVE_BUFFER_SIZE, "%c%d%c%d", col + 'a', 8 - row, col + 'a', 8 - (row + direction));
+        moves[*move_count] = strdup(move);
+        (*move_count)++;
+    }
+}
 
-    int square = 0;
-    const char *ptr = fen;
+/* Main function to generate all legal moves from a FEN string */
+char** generate_legal_moves(const char* fen, int* move_count) {
+    char board[8][8];
+    memset(board, '.', sizeof(board));
+    parse_fen(fen, board);
 
-    // Parse board state
-    while (*ptr && *ptr != ' ') {
-        if (isdigit(*ptr)) {
-            square += *ptr - '0';
-        } else if (*ptr == '/') {
-            continue;
-        } else {
-            state->board[square++] = *ptr;
-        }
-        ptr++;
+    char** moves = malloc(500 * sizeof(char*)); // Allocate memory for moves
+    if (moves == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return NULL;
     }
 
-    if (square != BOARD_SIZE) return -1; // Invalid board size
-
-    // Skip space and parse side to move
-    if (*ptr == ' ') ptr++;
-    state->side_to_move = (*ptr == 'w') ? WHITE : BLACK;
-
-    return 0;
-}
-
-// Generates pseudo-legal moves for pawns and returns them in algebraic notation
-void generate_legal_moves(const ChessState *state, char *output, size_t output_size) {
-    char moves[1024] = "";
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        if (state->board[i] == (state->side_to_move == WHITE ? PAWN : tolower(PAWN))) {
-            int forward = state->side_to_move == WHITE ? -8 : 8;
-            int target = i + forward;
-            if (target >= 0 && target < BOARD_SIZE && state->board[target] == EMPTY) {
-                char move[6];
-                snprintf(move, sizeof(move), "%s%s ", square_to_algebraic(i), square_to_algebraic(target));
-                strcat(moves, move);
+    *move_count = 0;
+    for (int row = 0; row < 8; row++) {
+        for (int col = 0; col < 8; col++) {
+            char piece = board[row][col];
+            if (piece == 'P') {
+                generate_pawn_moves(board, row, col, moves, move_count, 'w');
+            } else if (piece == 'p') {
+                generate_pawn_moves(board, row, col, moves, move_count, 'b');
             }
         }
     }
-    strncpy(output, moves, output_size - 1);
-    output[output_size - 1] = '\0';
+
+    return moves;
 }
 
-// Prints the board
-void print_board(const ChessState *state) {
-    for (int rank = 0; rank < 8; rank++) {
-        for (int file = 0; file < 8; file++) {
-            printf("%c ", state->board[rank * 8 + file]);
+/* Freeing the allocated moves */
+void free_moves(char** moves, int move_count) {
+    if (moves == NULL) {
+        return;
+    }
+    for (int i = 0; i < move_count; ++i) {
+        if (moves[i] != NULL) {
+            free(moves[i]);
         }
-        printf("\n");
     }
-    printf("Side to move: %s\n", state->side_to_move == WHITE ? "White" : "Black");
+    free(moves);
 }
 
-int main() {
-    const char *fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    ChessState state;
+/* Python-callable wrapper */
+__attribute__((visibility("default")))
+__attribute__((used))
+char** generate_legal_moves_py(const char* fen, int* move_count) {
+    return generate_legal_moves(fen, move_count);
+}
 
-    if (load_fen(fen, &state) != 0) {
-        printf("Invalid FEN string!\n");
-        return 1;
+/* Free individual string pointers */
+__attribute__((visibility("default")))
+__attribute__((used))
+void free_allocated_memory(void* ptr) {
+    if (ptr != NULL) {
+        free(ptr);
     }
-
-    print_board(&state);
-
-    char moves[1024];
-    generate_legal_moves(&state, moves, sizeof(moves));
-    printf("Legal moves: %s\n", moves);
-
-    return 0;
 }
