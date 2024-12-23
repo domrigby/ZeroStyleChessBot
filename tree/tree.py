@@ -17,6 +17,7 @@ from typing import List
 from line_profiler import profile
 
 import gc
+from numba import jit
 
 
 class Tree:
@@ -86,6 +87,8 @@ class Tree:
             # Initialise the threads env
             thread_env = env()
 
+            time.sleep(0.001 * thread_num)
+
             for idx in range(thread_num_expansions):
 
                 # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
@@ -107,10 +110,14 @@ class Tree:
                     if not current_node.branch_complete:
                         edge = current_node.puct(rng_generator=thread_rng)
 
-                current_node, reward, done = edge.expand(thread_env, state=current_node.state, node_queue=self.nodes)
+                current_node, reward, done = edge.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
                 self.backpropagation(visited_edges, reward)
 
                 current_node = self.root
+
+        self.nodes = ThreadLocalNodePool(self.num_workers, number_of_expansions//self.num_workers)
+        for _ in range(number_of_expansions):
+            self.nodes.put(Node())
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
 
@@ -137,6 +144,24 @@ class Tree:
                 edge.virtual_loss = 0
 
                 gamma_factor *= 0.99
+
+class ThreadLocalNodePool:
+    def __init__(self, num_threads, pool_size):
+        self.num_threads = num_threads
+        self.ctr = 0
+        self.local_pools = [Queue() for _ in range(num_threads)]
+        for pool in self.local_pools:
+            for _ in range(pool_size):
+                pool.put(Node())
+
+    def get(self, thread_id):
+        return self.local_pools[thread_id].get()
+
+    def put(self, node):
+        thread = self.ctr % self.num_threads
+        self.ctr += 1
+        self.local_pools[thread].put(node)
+
 
 class Node:
 
@@ -186,7 +211,7 @@ class Node:
                 self.edges.append(Edge(self, move))
 
         self.has_policy = False
-    @profile
+
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
 
         #TODO sort puct out with the locks
@@ -249,18 +274,18 @@ class Edge:
         self.move = move
 
     @profile
-    def expand(self, board: chess.Board, state: str = None, node_queue: Queue = None):
+    def expand(self, board: chess.Board, state: str = None, node_queue: Queue = None, thread_num: int = 0):
 
         if state is None:
             state = board.fen()  # Update the board state to the provided FEN string
 
         # Run the sim to update the board
-        board.push(state, str(self.move))
+        new_state = board.push(state, str(self.move))
 
         # Create a new child node
         if node_queue is not None:
-            self.child_node = node_queue.get()
-            self.child_node.re_init(state, board, parent_edge=self)
+            self.child_node = node_queue.get(thread_num)
+            self.child_node.re_init(new_state, board, parent_edge=self)
         else:  # If no queue provided, create a new node directly
             self.child_node = Node(board, parent_edge=self)
 
@@ -280,28 +305,9 @@ class Edge:
         Q =  self.W / self.N if self.N > 0 else 0.
         return Q
 
-
-class ThreadLocalNodePool:
-    """
-    Local queue to stop contention between threads
-    """
-    def __init__(self, num_threads, pool_size):
-        self.local_pools = [Queue() for _ in range(num_threads)]
-        for pool in self.local_pools:
-            for _ in range(pool_size):
-                pool.put(Node())
-
-    def get(self, thread_id):
-        return self.local_pools[thread_id].get()
-
-    def put(self, thread_id, node):
-        self.local_pools[thread_id].put(node)
-        self.local_pools[thread_id].put(node)
-        self.local_pools[thread_id].put(node)
-
 #
 if __name__ == '__main__':
-    tree = Tree(chess_moves.ChessEngine)
+    tree = Tree(chess_moves.ChessEngine, num_threads=6)
 
     sims = 25000
 

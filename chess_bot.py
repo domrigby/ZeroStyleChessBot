@@ -4,7 +4,7 @@ from tree.tree import Tree
 
 if __name__ == '__main__':
 
-    tree = Tree(chess_moves.ChessEngine)
+    tree = Tree(chess_moves.ChessEngine, num_threads=6)
 
     sims = 25000
 
