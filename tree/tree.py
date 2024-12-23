@@ -13,14 +13,15 @@ from queue import Queue, SimpleQueue
 from concurrent.futures import ThreadPoolExecutor
 
 from typing import List
-
 from line_profiler import profile
 
 import gc
 from numba import jit
 
+from tree.memory import Memory
 
-class Tree:
+
+class GameTree:
     def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
 
@@ -33,6 +34,8 @@ class Tree:
         # Create the root node of the tree
         self.root = Node(self.env(), state=start_state)
         self.nodes: List[Node] = []
+
+        self.memory = Memory(100000)
 
         # Create the queues
         self.state_queue = SimpleQueue()
@@ -87,8 +90,6 @@ class Tree:
             # Initialise the threads env
             thread_env = env()
 
-            time.sleep(0.001 * thread_num)
-
             for idx in range(thread_num_expansions):
 
                 # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
@@ -115,12 +116,17 @@ class Tree:
 
                 current_node = self.root
 
+            self.search_for_sufficiently_visited_nodes(self.root)
+            self.save_results_to_memory(self.root)
+            print("here")
+
         self.nodes = ThreadLocalNodePool(self.num_workers, number_of_expansions//self.num_workers)
         for _ in range(number_of_expansions):
             self.nodes.put(Node())
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
 
+            # TODO: change the to multiprocess with shared memory tree... stupidly misread the thread GIL relationship
             futures = [executor.submit(search_down_tree, self.env, number_of_expansions//self.num_workers,
                                        current_node, thread_num)
                        for thread_num in range(self.num_workers)]
@@ -144,6 +150,27 @@ class Tree:
                 edge.virtual_loss = 0
 
                 gamma_factor *= 0.99
+
+    def search_for_sufficiently_visited_nodes(self, root_node):
+
+        def recursive_search(node):
+
+            self.save_results_to_memory(node)
+
+            if node.branch_complete:
+                return
+
+            for edge in node.edges:
+                if edge.N >= 500:
+                    recursive_search(edge.child_node)
+
+    def save_results_to_memory(self, current_node):
+
+        state = current_node.state
+        moves = [edge.move for edge in current_node.edges]
+        visit_counts = [edge.N for edge in current_node.edges]
+
+        self.memory.save_state_to_moves(state, moves, visit_counts)
 
 class ThreadLocalNodePool:
     def __init__(self, num_threads, pool_size):
@@ -247,8 +274,6 @@ class Node:
         return used_edges[winner_index]
 
 
-
-
 class Edge:
 
     def __init__(self, parent_node: Node = None, move=None):
@@ -307,7 +332,8 @@ class Edge:
 
 #
 if __name__ == '__main__':
-    tree = Tree(chess_moves.ChessEngine, num_threads=6)
+
+    tree = GameTree(chess_moves.ChessEngine, num_threads=1)
 
     sims = 25000
 
@@ -317,7 +343,7 @@ if __name__ == '__main__':
     end_time = time.time()
 
     print(f"Time with parallel search {end_time-start_time:.3f}")
-    print([edge.N for edge in tree.root.edges])
+    print(sum([edge.N for edge in tree.root.edges]))
 
     best_moves = sorted(tree.root.edges, key= lambda x: x.Q, reverse=True)
 

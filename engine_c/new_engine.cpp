@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 #include <vector>
 #include <string>
 #include <cctype>
@@ -33,6 +34,149 @@ public:
         generate_moves(moves);
         return moves.empty();
     }
+
+    py::array_t<float> fen_to_tensor(const std::string& fen) {
+            set_position(fen);
+
+            // Create a 3D tensor with shape (12, 8, 8)
+            std::vector<float> tensor(12 * 8 * 8, 0.0f);
+
+            auto encode_piece = [&](char piece, int row, int col) {
+                int plane_index = -1;
+                bool is_white = isupper(piece);
+                char lower_piece = tolower(piece);
+
+                if (lower_piece == 'k') plane_index = 0;
+                else if (lower_piece == 'q') plane_index = 1;
+                else if (lower_piece == 'b') plane_index = 2;
+                else if (lower_piece == 'n') plane_index = 3;
+                else if (lower_piece == 'r') plane_index = 4;
+                else if (lower_piece == 'p') plane_index = 5;
+
+                if (plane_index != -1) {
+                    if (!is_white) plane_index += 6; // Opponent pieces are in the next 6 planes
+                    tensor[plane_index * 64 + row * 8 + col] = 1.0f;
+                }
+            };
+
+            // Encode the board into the tensor
+            for (int row = 0; row < 8; ++row) {
+                for (int col = 0; col < 8; ++col) {
+                    char piece = board[row][col];
+                    if (piece != '.') {
+                        encode_piece(piece, row, col);
+                    }
+                }
+            }
+
+            return py::array_t<float>({12, 8, 8}, tensor.data());
+        }
+
+    py::array_t<float> move_to_target(const std::string& move) {
+        // Create a 3D tensor with shape (64, 8, 8), initialized to zero
+        std::vector<float> target(64 * 8 * 8, 0.0f);
+
+        // Extract move details
+        int from_col = move[0] - 'a';
+        int from_row = '8' - move[1];
+        int to_col = move[2] - 'a';
+        int to_row = '8' - move[3];
+
+        // Determine the channel for the queen's or knight's move
+        int row_diff = to_row - from_row;
+        int col_diff = to_col - from_col;
+
+        int channel = -1;
+
+        // Handle queen-like moves
+        if (row_diff > 0 && col_diff == 0) channel = 0;       // Up
+        else if (row_diff < 0 && col_diff == 0) channel = 1;  // Down
+        else if (row_diff == 0 && col_diff > 0) channel = 2;  // Right
+        else if (row_diff == 0 && col_diff < 0) channel = 3;  // Left
+        else if (row_diff > 0 && col_diff > 0) channel = 4;   // Up-right diagonal
+        else if (row_diff > 0 && col_diff < 0) channel = 5;   // Up-left diagonal
+        else if (row_diff < 0 && col_diff > 0) channel = 6;   // Down-right diagonal
+        else if (row_diff < 0 && col_diff < 0) channel = 7;   // Down-left diagonal
+
+        // Check valid queen move distance
+        int distance = std::max(abs(row_diff), abs(col_diff));
+        if (distance <= 7 && channel != -1) {
+            channel += (distance - 1) * 8;
+        } else {
+            // Handle knight-like moves
+            static const int knight_offsets[8][2] = {
+                {2, 1}, {2, -1}, {-2, 1}, {-2, -1},
+                {1, 2}, {1, -2}, {-1, 2}, {-1, -2}
+            };
+
+            for (int i = 0; i < 8; ++i) {
+                if (row_diff == knight_offsets[i][0] && col_diff == knight_offsets[i][1]) {
+                    channel = 56 + i; // Knight channels start at 56
+                    break;
+                }
+            }
+        }
+
+        if (channel == -1) {
+            throw std::invalid_argument("Invalid move");
+        }
+
+        // One-hot encode the move in the tensor
+        target[channel * 64 + from_row * 8 + from_col] = 1.0f;
+
+        return py::array_t<float>({64, 8, 8}, target.data());
+    }
+
+    std::tuple<int, int, int> move_to_target_indices(const std::string& move) {
+        // Extract move details
+        int from_col = move[0] - 'a';
+        int from_row = '8' - move[1];
+        int to_col = move[2] - 'a';
+        int to_row = '8' - move[3];
+
+        // Determine the channel for the queen's or knight's move
+        int row_diff = to_row - from_row;
+        int col_diff = to_col - from_col;
+
+        int channel = -1;
+
+        // Handle queen-like moves
+        if (row_diff > 0 && col_diff == 0) channel = 0;       // Up
+        else if (row_diff < 0 && col_diff == 0) channel = 1;  // Down
+        else if (row_diff == 0 && col_diff > 0) channel = 2;  // Right
+        else if (row_diff == 0 && col_diff < 0) channel = 3;  // Left
+        else if (row_diff > 0 && col_diff > 0) channel = 4;   // Up-right diagonal
+        else if (row_diff > 0 && col_diff < 0) channel = 5;   // Up-left diagonal
+        else if (row_diff < 0 && col_diff > 0) channel = 6;   // Down-right diagonal
+        else if (row_diff < 0 && col_diff < 0) channel = 7;   // Down-left diagonal
+
+        // Check valid queen move distance
+        int distance = std::max(abs(row_diff), abs(col_diff));
+        if (distance <= 7 && channel != -1) {
+            channel += (distance - 1) * 8;
+        } else {
+            // Handle knight-like moves
+            static const int knight_offsets[8][2] = {
+                {2, 1}, {2, -1}, {-2, 1}, {-2, -1},
+                {1, 2}, {1, -2}, {-1, 2}, {-1, -2}
+            };
+
+            for (int i = 0; i < 8; ++i) {
+                if (row_diff == knight_offsets[i][0] && col_diff == knight_offsets[i][1]) {
+                    channel = 56 + i; // Knight channels start at 56
+                    break;
+                }
+            }
+        }
+
+        if (channel == -1) {
+            throw std::invalid_argument("Invalid move");
+        }
+
+        // Return the channel, row, and column indices
+        return std::make_tuple(channel, from_row, from_col);
+    }
+
 
 private:
     char board[8][8] = {{'.'}};
@@ -274,5 +418,8 @@ PYBIND11_MODULE(chess_moves, m) {
         .def("legal_moves", &ChessEngine::get_legal_moves)
         .def("push", &ChessEngine::make_move, py::arg("fen"), py::arg("move"))
         .def("is_game_over", &ChessEngine::is_game_over)
-        .def("get_board", &ChessEngine::get_board);
+        .def("get_board", &ChessEngine::get_board)
+        .def("fen_to_tensor", &ChessEngine::fen_to_tensor, py::arg("fen"))
+        .def("move_to_target", &ChessEngine::move_to_target, py::arg("move"))
+        .def("move_to_target_indices", &ChessEngine::move_to_target_indices, py::arg("move"));
 }

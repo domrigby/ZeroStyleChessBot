@@ -52,6 +52,30 @@ def test_chess_engine():
     print("Is the game over?", game_over)
     assert not game_over, "Game should not be over at the start!"
 
+    engine = chess_moves.ChessEngine()
+    fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    tensor = engine.fen_to_tensor(fen)
+    print(tensor.shape)  # Should print (12, 8, 8)
+    print(tensor)  # View the tensor
+
+    engine = chess_moves.ChessEngine()
+    move = "b2b7"
+    target = engine.move_to_target(move)
+    print(target.shape)  # Should print (64, 8, 8)
+    print(target)  # View the one-hot encoded target tensor
+    import numpy as np
+    print(np.where(target==1))
+
+    # Create an instance of the ChessEngine
+    engine = chess_moves.ChessEngine()
+    # Example move string
+    move = "g1f3"  # Knight move from g1 to f3
+    # Call the move_to_target_indices function
+    channel, row, col = engine.move_to_target_indices(move)
+    # Print the result
+    print(f"Move: {move}")
+    print(f"Channel: {channel}, Row: {row}, Col: {col}")
+
     print("\nAll tests passed!")
 
 if __name__ == "__main__":

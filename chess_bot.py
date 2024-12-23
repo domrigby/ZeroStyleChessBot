@@ -1,10 +1,10 @@
 import chess
 import chess_moves
-from tree.tree import Tree
+from tree.tree import GameTree
 
 if __name__ == '__main__':
 
-    tree = Tree(chess_moves.ChessEngine, num_threads=6)
+    tree = GameTree(chess_moves.ChessEngine, num_threads=1)
 
     sims = 25000
 
@@ -14,7 +14,9 @@ if __name__ == '__main__':
     end_time = time.time()
 
     print(f"Time with parallel search {end_time-start_time:.3f}")
-    print([edge.N for edge in tree.root.edges])
+    print(sum([edge.N for edge in tree.root.edges]))
+
+    print(len(tree.memory.states))
 
     # tree = Tree(chess.Board)
     # start_time = time.time()
