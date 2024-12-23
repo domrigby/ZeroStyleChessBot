@@ -1,8 +1,10 @@
 import chess
+import chess_moves
 from tree.tree import Tree
 
 if __name__ == '__main__':
-    tree = Tree(chess.Board)
+
+    tree = Tree(chess_moves.ChessEngine)
 
     sims = 25000
 

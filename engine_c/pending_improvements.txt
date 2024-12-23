@@ -1,0 +1,3 @@
+IMPROVEMENTS
+
+1. This currently both loads fen to the object for some functions and then also takes it as an argument to other. Neeed to sort this out

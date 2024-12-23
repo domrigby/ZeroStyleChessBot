@@ -9,7 +9,7 @@ import chess_moves
 from copy import copy
 
 import threading
-from queue import Queue
+from queue import Queue, SimpleQueue
 from concurrent.futures import ThreadPoolExecutor
 
 from typing import List
@@ -20,7 +20,8 @@ import gc
 
 
 class Tree:
-    def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6):
+    def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
+                 start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
 
         if env_kwargs is None:
             env_kwargs = {}
@@ -29,11 +30,11 @@ class Tree:
         self.env = env
 
         # Create the root node of the tree
-        self.root = Node(self.env())
+        self.root = Node(self.env(), state=start_state)
         self.nodes: List[Node] = []
 
         # Create the queues
-        self.state_queue = Queue()
+        self.state_queue = SimpleQueue()
         self.lock = threading.Lock()
         self.num_workers = num_threads
 
@@ -62,7 +63,7 @@ class Tree:
                 # If the node has no children, it's a leaf
                 leaf = True
                 # Set board to correct state with the nodes FEN
-                self.envs[0].set_fen(current_node.state)
+                self.envs[0].set_position(current_node.state)
                 current_node, reward, done = edge.expand(self.envs[0])
                 self.nodes.append(current_node)
             else:
@@ -76,11 +77,7 @@ class Tree:
         if current_node is None:
             current_node = self.root
 
-        # Preallocate the memory
-        self.nodes = Queue()
-        for _ in range(number_of_expansions):
-            self.nodes.put(Node())
-
+        @profile
         def search_down_tree(env, thread_num_expansions: int, current_node, thread_num: int = 0):
 
             # Sharaing a radndom number generator SEVERELY slows down the process... explainationn pending
@@ -110,8 +107,7 @@ class Tree:
                     if not current_node.branch_complete:
                         edge = current_node.puct(rng_generator=thread_rng)
 
-                thread_env.set_fen(current_node.state)
-                current_node, reward, done = edge.expand(thread_env, self.nodes)
+                current_node, reward, done = edge.expand(thread_env, state=current_node.state, node_queue=self.nodes)
                 self.backpropagation(visited_edges, reward)
 
                 current_node = self.root
@@ -145,14 +141,14 @@ class Tree:
 class Node:
 
     DEFAULT_EDGE_NUM = 24
-    def __init__(self, board=None, parent_edge=None):
+    def __init__(self, board=None, parent_edge=None, state=None):
 
         self.lock = threading.Lock()
 
         if board is not None:
             # TODO: sort out edge initialisation
             self.edges: List[Edge] = []
-            self.re_init(board, parent_edge)
+            self.re_init(state, board, parent_edge)
         else:
             # Initialise empty forms of the class
             self.state: board.fen = None  # The chess fen string object representing this state
@@ -165,12 +161,14 @@ class Node:
 
             self.has_policy = False
 
-    def re_init(self, board=None, parent_edge=None):
+    def re_init(self, state:str, board, parent_edge=None):
 
-        self.state= board.fen()  # The chess fen string object representing this state
+        self.state = state  # The chess fen string object representing this state
+
         self.parent_edge = parent_edge  # Reference to the parent edge
 
-        legal_moves = chess_moves.get_legal_moves(self.state)
+        board.set_fen(self.state)
+        legal_moves =  board.legal_moves()
 
         self.number_legal_moves = len(list(legal_moves))
 
@@ -188,14 +186,13 @@ class Node:
                 self.edges.append(Edge(self, move))
 
         self.has_policy = False
-
+    @profile
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
 
         #TODO sort puct out with the locks
         # Do all puct stuff in one go so that other threads cant edit it whilst
         # visits = np.sum([edge.N for edge in self.edges])
         # return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * np.sqrt(visits + 1) / (edge.N + 1)))
-
         used_edges = [edge for edge in self.edges if edge.move is not None]
 
         Qs = np.array([edge.Q + edge.virtual_loss for edge in used_edges])
@@ -225,6 +222,8 @@ class Node:
         return used_edges[winner_index]
 
 
+
+
 class Edge:
 
     def __init__(self, parent_node: Node = None, move=None):
@@ -250,32 +249,27 @@ class Edge:
         self.move = move
 
     @profile
-    def expand(self, board: chess.Board, node_queue: Queue = None):
+    def expand(self, board: chess.Board, state: str = None, node_queue: Queue = None):
 
-        # Check if the move is a capture (not a pawn move)
-        capture = board.is_capture(self.move)
+        if state is None:
+            state = board.fen()  # Update the board state to the provided FEN string
 
         # Run the sim to update the board
-        board.push(self.move)
+        board.push(state, str(self.move))
 
         # Create a new child node
         if node_queue is not None:
             self.child_node = node_queue.get()
-            self.child_node.re_init(board, parent_edge=self)
+            self.child_node.re_init(state, board, parent_edge=self)
         else:  # If no queue provided, create a new node directly
             self.child_node = Node(board, parent_edge=self)
 
-        # Check if done
-        done = board.is_game_over()
-
         # Calculate the reward
+        done = board.is_game_over()
         if done:
             reward = 1. if board.result() == "1-0" else -1. if board.result() == "0-1" else 0.
         else:
             reward = 0.
-
-        if capture:
-            reward += 1.
 
         # Update statistics
 
@@ -286,9 +280,28 @@ class Edge:
         Q =  self.W / self.N if self.N > 0 else 0.
         return Q
 
+
+class ThreadLocalNodePool:
+    """
+    Local queue to stop contention between threads
+    """
+    def __init__(self, num_threads, pool_size):
+        self.local_pools = [Queue() for _ in range(num_threads)]
+        for pool in self.local_pools:
+            for _ in range(pool_size):
+                pool.put(Node())
+
+    def get(self, thread_id):
+        return self.local_pools[thread_id].get()
+
+    def put(self, thread_id, node):
+        self.local_pools[thread_id].put(node)
+        self.local_pools[thread_id].put(node)
+        self.local_pools[thread_id].put(node)
+
 #
 if __name__ == '__main__':
-    tree = Tree(chess.Board)
+    tree = Tree(chess_moves.ChessEngine)
 
     sims = 25000
 
@@ -300,23 +313,7 @@ if __name__ == '__main__':
     print(f"Time with parallel search {end_time-start_time:.3f}")
     print([edge.N for edge in tree.root.edges])
 
-    # tree = Tree(chess.Board)
-    # start_time = time.time()
-    # tree.search_down_tree(sims)
-    # end_time = time.time()
-    # #
-    # print(f"Time with no parallel search {end_time-start_time:.3f}")
-
-    print([edge.Q for edge in tree.root.edges])
-
     best_moves = sorted(tree.root.edges, key= lambda x: x.Q, reverse=True)
 
     # Create the root of the tree
     initial_board = chess.Board()
-
-    # for move in best_moves:
-    #     initial_board.reset_board()
-    #     initial_board.push(move.move)
-    #     print(initial_board, "\n")
-
-    print("here")
