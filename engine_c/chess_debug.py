@@ -76,6 +76,21 @@ def test_chess_engine():
     print(f"Move: {move}")
     print(f"Channel: {channel}, Row: {row}, Col: {col}")
 
+    # Define a sequence of moves
+    moves = ["e2e4", "e7e5", "g1f3", "b8c6"]  # Standard opening moves
+
+    # Get the board tensor for these moves, assuming white is playing
+    white_to_play = False
+    board_tensor = engine.moves_to_board_tensor(moves, white_to_play)
+
+    # Convert the tensor to a NumPy array for inspection
+    board_tensor_np = np.array(board_tensor)
+
+    # Print details about the tensor
+    print("Shape of board tensor:", board_tensor_np.shape)  # Should be (12, 8, 8)
+    print("Board tensor (first channel):\n", board_tensor_np[0])  # Example: First
+    print("All channels:\n", np.argmax(board_tensor_np, 0))
+
     print("\nAll tests passed!")
 
 if __name__ == "__main__":

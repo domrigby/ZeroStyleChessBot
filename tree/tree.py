@@ -117,22 +117,23 @@ class GameTree:
                 current_node = self.root
 
             self.search_for_sufficiently_visited_nodes(self.root)
-            self.save_results_to_memory(self.root)
-            print("here")
 
         self.nodes = ThreadLocalNodePool(self.num_workers, number_of_expansions//self.num_workers)
         for _ in range(number_of_expansions):
             self.nodes.put(Node())
 
-        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+        search_down_tree(self.env, number_of_expansions // self.num_workers, current_node, 0)
 
-            # TODO: change the to multiprocess with shared memory tree... stupidly misread the thread GIL relationship
-            futures = [executor.submit(search_down_tree, self.env, number_of_expansions//self.num_workers,
-                                       current_node, thread_num)
-                       for thread_num in range(self.num_workers)]
-
-            for future in futures:
-                future.result()
+        # TODO: change the to multiprocess with shared memory tree... stupidly misread the thread GIL relation
+        # with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+        #
+        #     ship
+        #     futures = [executor.submit(search_down_tree, self.env, number_of_expansions//self.num_workers,
+        #                                current_node, thread_num)
+        #                for thread_num in range(self.num_workers)]
+        #
+        #     for future in futures:
+        #         future.result()
 
 
     def backpropagation(self, visited_edges, observed_reward: float):
@@ -152,7 +153,6 @@ class GameTree:
                 gamma_factor *= 0.99
 
     def search_for_sufficiently_visited_nodes(self, root_node):
-
         def recursive_search(node):
 
             self.save_results_to_memory(node)
@@ -164,6 +164,10 @@ class GameTree:
                 if edge.N >= 500:
                     recursive_search(edge.child_node)
 
+            return
+
+        recursive_search(root_node)
+
     def save_results_to_memory(self, current_node):
 
         state = current_node.state
@@ -171,6 +175,7 @@ class GameTree:
         visit_counts = [edge.N for edge in current_node.edges]
 
         self.memory.save_state_to_moves(state, moves, visit_counts)
+
 
 class ThreadLocalNodePool:
     def __init__(self, num_threads, pool_size):
@@ -240,39 +245,15 @@ class Node:
         self.has_policy = False
 
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
-
         #TODO sort puct out with the locks
         # Do all puct stuff in one go so that other threads cant edit it whilst
-        # visits = np.sum([edge.N for edge in self.edges])
-        # return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * np.sqrt(visits + 1) / (edge.N + 1)))
-        used_edges = [edge for edge in self.edges if edge.move is not None]
+        visits = np.sum([edge.N for edge in self.edges])
+        return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * np.sqrt(visits + 1) / (edge.N + 1)))
 
-        Qs = np.array([edge.Q + edge.virtual_loss for edge in used_edges])
-        Ns = np.array([edge.N for edge in used_edges])
-
-        # PUCT calculation
-        puct_vals = Qs + 5.0 * np.sqrt(np.sum(Ns)) / (1 + Ns)
-
-        if len(puct_vals) == 0:
-            print(self.number_legal_moves)
-
-        # Choose the child node with the highest PUCT value
-        max_indices = np.where(puct_vals == np.max(puct_vals))[0]
-
-        # Randomly choose one of the indices
-        if draw_num is None:
-            if rng_generator is None:
-                winner_index = np.random.choice(max_indices)
-            else:
-                # Im aware this could be done using choice...but this extremely slow in parallel
-                rnd_idx = rng_generator.integers(low=0, high=len(max_indices))
-                winner_index = max_indices[rnd_idx]
-        else:
-            draw_num = draw_num % len(max_indices)
-            winner_index = max_indices[draw_num]
-
-        return used_edges[winner_index]
-
+    def select_new_root_node(self):
+        Ns = np.array([edge.N for edge in self.edges])
+        probs = Ns / np.sum(Ns)
+        return np.random.choice(self.edges, p=probs).child_node
 
 class Edge:
 
@@ -339,7 +320,9 @@ if __name__ == '__main__':
 
     import time
     start_time = time.time()
-    tree.parallel_search(number_of_expansions=sims)
+    for i in range(10):
+        tree.parallel_search(number_of_expansions=sims)
+        tree.root_node
     end_time = time.time()
 
     print(f"Time with parallel search {end_time-start_time:.3f}")

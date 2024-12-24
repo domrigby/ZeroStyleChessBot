@@ -26,11 +26,3 @@ class Memory:
         total = np.sum(visits)
         for move, count in zip(moves, visits):
             self.moves.append(Move(move, count / total))
-
-        print('here')
-
-    def select_next_move(self):
-
-
-
-
