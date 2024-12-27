@@ -1,5 +1,6 @@
-from neural_nets.generic_net import GenericNet, ConvBlock
+from neural_nets.generic_net import GenericNet, ConvBlock, check_input
 from torch import nn
+import torch
 
 class ChessNet(GenericNet):
 
@@ -16,10 +17,14 @@ class ChessNet(GenericNet):
 
         super().__init__(*args, **kwargs)
 
+        self.value_loss = nn.MSELoss()
+        self.policy_loss = nn.CrossEntropyLoss()
+
     def _build_network(self):
 
         self.activation = nn.LeakyReLU()
-        self.input_conv = nn.Conv2D(self.input_size[-1], self.num_filters, kernel_size=3, padding=1)
+        self.input_conv = nn.Conv2d(self.input_size[0], self.num_filters, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(self.num_filters)
 
         conv_block_repeats = []
         for _ in range(self.num_repeats):
@@ -27,21 +32,74 @@ class ChessNet(GenericNet):
 
         self.conv_blocks = nn.Sequential(*conv_block_repeats)
 
-        self.output_conv = nn.Conv2D(self.num_filters, self.output_size[-1], kernel_size=3, padding=1)
+        self.policy_head = nn.Sequential(nn.Conv2d(self.num_filters, self.num_filters, kernel_size=3, padding=1),
+                                         nn.LeakyReLU(),
+                                         nn.Conv2d(self.num_filters, self.num_filters, kernel_size=3, padding=1),
+                                         nn.LeakyReLU(),
+                                         nn.BatchNorm2d(self.num_filters),
+                                         nn.Conv2d(self.num_filters, self.output_size[0], kernel_size=3, padding=1))
 
-        self.output_act = nn.Softmax(dim=1)  # Softmax for multi-class classification
+        self.value_head = nn.Sequential(nn.Conv2d(self.num_filters, self.num_filters, kernel_size=3, padding=1),
+                                     nn.LeakyReLU(),
+                                     nn.Conv2d(self.num_filters, 1, kernel_size=1, padding=1),
+                                     nn.LeakyReLU(),
+                                     nn.Flatten(),
+                                     nn.Linear(100, 256),
+                                     nn.LeakyReLU(),
+                                     nn.BatchNorm1d(256),
+                                     nn.Linear(256, 1),
+                                     nn.Tanh())
 
-    def forward(self, x: tensor, legal_moves: list[bool] = None):
+    @check_input
+    def forward(self, x: torch.tensor, legal_move_mask: torch.tensor = None):
 
         x = self.input_conv(x)
+        x = self.bn1(x)
+
         x = self.activation(x)
 
         x = self.conv_blocks(x)
-        x = self.output_conv(x)
 
-        x = self.output_act(x)
+        value = self.value_head(x)
 
-        return x
+        policy = self.policy_head(x)
+
+        if legal_move_mask is not None:
+
+            # Where legal move, take policy, else -inf
+            policy = torch.where(legal_move_mask==1, policy, -torch.inf)
+
+            size_pre_flat = policy.size()
+
+            policy = policy.view(policy.size(0), -1)
+
+            policy = torch.nn.functional.softmax(policy, dim=1)
+
+            policy = policy.view(size_pre_flat)
+
+        return value, policy
+
+    def loss_function(self, input: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None):
+
+        target_value, target_policy = target
+        target_value, target_policy = target_value.unsqueeze(-1).to(self.device), target_policy.to(self.device)
+
+        # Predicted value
+        predicted_value, predicted_policy = self(input, legal_move_mask)
+
+        # Calculate losses
+        value_loss = self.value_loss(predicted_value, target_value)
+        policy_loss = self.policy_loss(predicted_policy, torch.tensor(target_policy))
+
+        total_loss = value_loss + policy_loss
+
+        # Step the weights
+        total_loss.backward()
+        self.optimiser.step()
+
+        return total_loss
+
+
 
 
 

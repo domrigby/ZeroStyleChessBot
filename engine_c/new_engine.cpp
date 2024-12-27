@@ -73,48 +73,35 @@ public:
         }
 
     py::array_t<float> move_to_target(const std::string& move) {
-        // Create a 3D tensor with shape (64, 8, 8), initialized to zero
-        std::vector<float> target(64 * 8 * 8, 0.0f);
+        // Ensure the move string is valid
+        if ((move.size() != 4 && move != "O-O" && move != "O-O-O") ||
+            (move != "O-O" && move != "O-O-O" &&
+             (move[0] < 'a' || move[0] > 'h' || move[2] < 'a' || move[2] > 'h' ||
+              move[1] < '1' || move[1] > '8' || move[3] < '1' || move[3] > '8'))) {
+            throw std::invalid_argument("Invalid move format");
+        }
 
-        // Extract move details
-        int from_col = move[0] - 'a';
-        int from_row = '8' - move[1];
-        int to_col = move[2] - 'a';
-        int to_row = '8' - move[3];
-
-        // Determine the channel for the queen's or knight's move
-        int row_diff = to_row - from_row;
-        int col_diff = to_col - from_col;
+        // Create a 3D tensor with shape (66, 8, 8), initialized to zero
+        std::vector<float> target(66 * 8 * 8, 0.0f);
 
         int channel = -1;
+        int from_row = 0, from_col = 0; // Default initialization
 
-        // Handle queen-like moves
-        if (row_diff > 0 && col_diff == 0) channel = 0;       // Up
-        else if (row_diff < 0 && col_diff == 0) channel = 1;  // Down
-        else if (row_diff == 0 && col_diff > 0) channel = 2;  // Right
-        else if (row_diff == 0 && col_diff < 0) channel = 3;  // Left
-        else if (row_diff > 0 && col_diff > 0) channel = 4;   // Up-right diagonal
-        else if (row_diff > 0 && col_diff < 0) channel = 5;   // Up-left diagonal
-        else if (row_diff < 0 && col_diff > 0) channel = 6;   // Down-right diagonal
-        else if (row_diff < 0 && col_diff < 0) channel = 7;   // Down-left diagonal
-
-        // Check valid queen move distance
-        int distance = std::max(abs(row_diff), abs(col_diff));
-        if (distance <= 7 && channel != -1) {
-            channel += (distance - 1) * 8;
+        if (move == "O-O") {
+            // Kingside castling
+            channel = 64; // Assign channel 64 for kingside castling
+        } else if (move == "O-O-O") {
+            // Queenside castling
+            channel = 65; // Assign channel 65 for queenside castling
         } else {
-            // Handle knight-like moves
-            static const int knight_offsets[8][2] = {
-                {2, 1}, {2, -1}, {-2, 1}, {-2, -1},
-                {1, 2}, {1, -2}, {-1, 2}, {-1, -2}
-            };
+            // Extract move details
+            from_col = move[0] - 'a';
+            from_row = '8' - move[1];
+            int to_col = move[2] - 'a';
+            int to_row = '8' - move[3];
 
-            for (int i = 0; i < 8; ++i) {
-                if (row_diff == knight_offsets[i][0] && col_diff == knight_offsets[i][1]) {
-                    channel = 56 + i; // Knight channels start at 56
-                    break;
-                }
-            }
+            // Determine the channel using helper
+            channel = calculate_channel(from_row, from_col, to_row, to_col);
         }
 
         if (channel == -1) {
@@ -124,31 +111,59 @@ public:
         // One-hot encode the move in the tensor
         target[channel * 64 + from_row * 8 + from_col] = 1.0f;
 
-        return py::array_t<float>({64, 8, 8}, target.data());
+        return py::array_t<float>({66, 8, 8}, target.data());
     }
 
     std::tuple<int, int, int> move_to_target_indices(const std::string& move) {
-        // Extract move details
-        int from_col = move[0] - 'a';
-        int from_row = '8' - move[1];
-        int to_col = move[2] - 'a';
-        int to_row = '8' - move[3];
+        // Ensure the move string is valid
+        if ((move.size() != 4 && move != "O-O" && move != "O-O-O") ||
+            (move != "O-O" && move != "O-O-O" &&
+             (move[0] < 'a' || move[0] > 'h' || move[2] < 'a' || move[2] > 'h' ||
+              move[1] < '1' || move[1] > '8' || move[3] < '1' || move[3] > '8'))) {
+            throw std::invalid_argument("Invalid move format");
+        }
 
-        // Determine the channel for the queen's or knight's move
+        int channel = -1;
+        int from_row = 0, from_col = 0; // Default initialization
+
+        if (move == "O-O") {
+            // Kingside castling
+            channel = 64; // Assign channel 64 for kingside castling
+        } else if (move == "O-O-O") {
+            // Queenside castling
+            channel = 65; // Assign channel 65 for queenside castling
+        } else {
+            // Extract move details
+            from_col = move[0] - 'a';
+            from_row = '8' - move[1];
+            int to_col = move[2] - 'a';
+            int to_row = '8' - move[3];
+
+            // Determine the channel using helper
+            channel = calculate_channel(from_row, from_col, to_row, to_col);
+        }
+
+        if (channel == -1) {
+            throw std::invalid_argument("Invalid move");
+        }
+
+        // Return the channel, row, and column indices
+        return std::make_tuple(channel, from_row, from_col);
+    }
+
+    // Helper function to calculate the channel
+    int calculate_channel(int from_row, int from_col, int to_row, int to_col) {
         int row_diff = to_row - from_row;
         int col_diff = to_col - from_col;
 
         int channel = -1;
 
         // Handle queen-like moves
-        if (row_diff > 0 && col_diff == 0) channel = 0;       // Up
-        else if (row_diff < 0 && col_diff == 0) channel = 1;  // Down
-        else if (row_diff == 0 && col_diff > 0) channel = 2;  // Right
-        else if (row_diff == 0 && col_diff < 0) channel = 3;  // Left
-        else if (row_diff > 0 && col_diff > 0) channel = 4;   // Up-right diagonal
-        else if (row_diff > 0 && col_diff < 0) channel = 5;   // Up-left diagonal
-        else if (row_diff < 0 && col_diff > 0) channel = 6;   // Down-right diagonal
-        else if (row_diff < 0 && col_diff < 0) channel = 7;   // Down-left diagonal
+        if (row_diff != 0 && col_diff == 0) channel = (row_diff > 0) ? 0 : 1;  // Up/Down
+        else if (row_diff == 0 && col_diff != 0) channel = (col_diff > 0) ? 2 : 3;  // Right/Left
+        else if (abs(row_diff) == abs(col_diff)) {
+            channel = (row_diff > 0) ? ((col_diff > 0) ? 4 : 5) : ((col_diff > 0) ? 6 : 7);  // Diagonals
+        }
 
         // Check valid queen move distance
         int distance = std::max(abs(row_diff), abs(col_diff));
@@ -173,9 +188,83 @@ public:
             throw std::invalid_argument("Invalid move");
         }
 
-        // Return the channel, row, and column indices
-        return std::make_tuple(channel, from_row, from_col);
+        return channel;
     }
+
+std::string indices_to_move(int channel, int from_row, int from_col) {
+    if (channel == 64) {
+        return "O-O";   // Kingside castling
+    } else if (channel == 65) {
+        return "O-O-O"; // Queenside castling
+    }
+
+    int to_row = from_row;
+    int to_col = from_col;
+
+    if (channel >= 0 && channel < 56) {
+        // Queen-like moves
+        int direction = channel % 8;
+        int distance = (channel / 8) + 1;
+
+        switch (direction) {
+            case 0: // "Up" (increase row index)
+                to_row = from_row + distance;
+                break;
+            case 1: // "Down" (decrease row index)
+                to_row = from_row - distance;
+                break;
+            case 2: // "Right"
+                to_col = from_col + distance;
+                break;
+            case 3: // "Left"
+                to_col = from_col - distance;
+                break;
+            case 4: // "Up-Right"
+                to_row = from_row + distance;
+                to_col = from_col + distance;
+                break;
+            case 5: // "Up-Left"
+                to_row = from_row + distance;
+                to_col = from_col - distance;
+                break;
+            case 6: // "Down-Right"
+                to_row = from_row - distance;
+                to_col = from_col + distance;
+                break;
+            case 7: // "Down-Left"
+                to_row = from_row - distance;
+                to_col = from_col - distance;
+                break;
+            default:
+                throw std::invalid_argument("Invalid direction for queen-like move");
+        }
+    } else if (channel >= 56 && channel < 64) {
+        // Knight moves
+        static const int knight_offsets[8][2] = {
+            { 2,  1}, { 2, -1}, {-2,  1}, {-2, -1},
+            { 1,  2}, { 1, -2}, {-1,  2}, {-1, -2}
+        };
+        int knight_index = channel - 56;
+        to_row = from_row + knight_offsets[knight_index][0];
+        to_col = from_col + knight_offsets[knight_index][1];
+    } else {
+        throw std::invalid_argument("Invalid channel");
+    }
+
+    // Validate the resulting indices are within bounds
+    if (to_row < 0 || to_row > 7 || to_col < 0 || to_col > 7) {
+        throw std::invalid_argument("Calculated move is out of bounds");
+    }
+
+    // Convert the from and to indices into algebraic notation
+    char from_col_char = 'a' + from_col;
+    char from_row_char = '8' - from_row;
+    char to_col_char   = 'a' + to_col;
+    char to_row_char   = '8' - to_row;
+
+    return std::string({from_col_char, from_row_char, to_col_char, to_row_char});
+}
+
 
     py::array_t<float> moves_to_board_tensor(const std::vector<std::string>& moves, bool white_to_play) {
         // Reset the board to the starting position
@@ -187,7 +276,8 @@ public:
         }
 
         // Create a 3D tensor with shape (12, 8, 8)
-        std::vector<float> tensor(12 * 8 * 8, 0.0f);
+        py::array_t<float> tensor_array({12, 8, 8});
+        auto tensor = tensor_array.mutable_data();
 
         auto encode_piece = [&](char piece, int row, int col) {
             int plane_index = -1;
@@ -217,8 +307,9 @@ public:
             }
         }
 
-        return py::array_t<float>({12, 8, 8}, tensor.data());
+        return tensor_array;
     }
+
 
 private:
     char board[8][8] = {{'.'}};
@@ -464,5 +555,6 @@ PYBIND11_MODULE(chess_moves, m) {
         .def("fen_to_tensor", &ChessEngine::fen_to_tensor, py::arg("fen"))
         .def("move_to_target", &ChessEngine::move_to_target, py::arg("move"))
         .def("move_to_target_indices", &ChessEngine::move_to_target_indices, py::arg("move"))
-        .def("moves_to_board_tensor", &ChessEngine::moves_to_board_tensor, py::arg("moves"), py::arg("white_to_play"));
+        .def("moves_to_board_tensor", &ChessEngine::moves_to_board_tensor, py::arg("moves"), py::arg("white_to_play"))
+        .def("indices_to_move", &ChessEngine::indices_to_move, py::arg("channel"), py::arg("from_row"), py::arg("from_col"));
 }
