@@ -26,3 +26,7 @@ class Memory:
         total = np.sum(visits)
         for move, count in zip(moves, visits):
             self.moves.append(Move(move, count / total))
+
+    def get_batch(self, batch_size: int = 32):
+
+        idxs = np.random.choice(len(self.moves))

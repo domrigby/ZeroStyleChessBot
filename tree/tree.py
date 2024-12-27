@@ -138,7 +138,7 @@ class GameTree:
 
     def backpropagation(self, visited_edges, observed_reward: float):
 
-        gamma_factor = 0.99
+        gamma_factor = 1
 
         for edge in reversed(visited_edges):
 
@@ -150,7 +150,7 @@ class GameTree:
                 # Unlock the edge for further exploration
                 edge.virtual_loss = 0
 
-                gamma_factor *= 0.99
+                gamma_factor *= 1
 
     def search_for_sufficiently_visited_nodes(self, root_node):
         def recursive_search(node):

@@ -49,7 +49,7 @@ class ChessDataset(Dataset):
             if len(moves) < 5:
                 continue  # Skip games with no moves
             winner = row['winner']
-            self.add_game_to_dataset(moves, winner, 'algebraic')
+            self.add_game_to_dataset(moves, winner)
 
     def load_pgn(self, pgn_path):
         """
@@ -72,15 +72,20 @@ class ChessDataset(Dataset):
                     winner = "black"
                 else:
                     winner = "draw"
-                self.add_game_to_dataset(moves, winner, 'pgn')
+                self.add_game_to_dataset(moves, winner)
 
-    def add_game_to_dataset(self, moves, winner, move_type):
+    def add_game_to_dataset(self, moves, winner):
         """
         Precompute FEN states and moves for a single game and add to the dataset.
         """
         board = chess.Board()
         game_data = []
-        for move in moves:
+
+        if len(moves) < 5:
+            # Skip this game
+            return
+
+        for idx, move in enumerate(moves):
             fen = board.fen()
             try:
 
@@ -101,15 +106,12 @@ class ChessDataset(Dataset):
                     print(f"Game state {fen} with no legal moves.")
                     continue
 
-                game_data.append({'fen': fen, 'move': str(move), 'legal_moves': legal_moves})
+                self.games.append({'fen': fen, 'move': str(move), 'legal_moves': legal_moves, 'winner': winner, 'turn_num': idx})
 
             except Exception as e:
                 # Skip invalid moves
                 print(f"Invalid move: {move} due to {e}")
                 break
-
-        if len(game_data) >= 5:  # Ensure the game has enough moves
-            self.games.append({'data': game_data, 'winner': winner, 'type': move_type})
 
     def __len__(self):
         """
@@ -121,14 +123,13 @@ class ChessDataset(Dataset):
         """
         Get a precomputed FEN state and move for a game.
         """
-        game = self.games[idx]
-        data = random.choice(game['data'])  # Randomly select a FEN state and move
+        data = self.games[idx]
         fen = data['fen']
         move = data['move']
 
         # Determine the result for the player
-        player = 'white' if game['data'].index(data) % 2 == 0 else 'black'
-        result = 1. if game['winner'] == player else -1.
+        player = 'white' if data['turn_num'] % 2 == 0 else 'black'
+        result = 1. if data['winner'] == player else -1.
 
         # Convert FEN state and move to tensors
         board_tensor = self.chess_engine.fen_to_tensor(fen)
@@ -152,19 +153,21 @@ if __name__ == '__main__':
     # Example Usage
     # Provide lists of paths to your CSV and PGN files
     csv_paths = [] #[r"/home/dom/Code/chess_bot/neural_nets/data/games.csv"]  # Replace with your CSV file paths
-    pgn_paths =  [] #["/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-black.pgn" ,
+    pgn_paths =  [] # ["/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-black.pgn" ,
                  # "/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-white.pgn",
                  # "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-black.pgn",
                  # "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-white.pgn"]  # Replace with your PGN file paths
 
     # Initialize dataset with multiple CSV and PGN files
     chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, pickle_file='data/game.pkl')
-    dataloader = DataLoader(chess_dataset, batch_size=32, shuffle=True  , num_workers=3)
+    dataloader = DataLoader(chess_dataset, batch_size=64, shuffle=True  , num_workers=3)
 
     idx = 0
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16, init_lr=0.00005)
 
     import matplotlib.pyplot as plt
+
+    print(f"Data points: {len(chess_dataset.games)} Batches: {len(chess_dataset.games)//64}")
 
     # Initialize the live plot
     plt.ion()  # Turn on interactive mode

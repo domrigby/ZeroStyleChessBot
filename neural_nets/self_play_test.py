@@ -25,6 +25,8 @@ def get_move_from_tensor(tensor, chess_engine):
     from_row = flat_index // 8
     from_col = flat_index % 8
 
+    print(f"Move prob: {tensor[channel, from_row, from_col]}")
+
     return chess_engine.indices_to_move(channel, from_row, from_col)
 
 counter = 0
