@@ -128,7 +128,7 @@ class ChessDataset(Dataset):
         move = data['move']
 
         # Determine the result for the player
-        player = 'white' if data['turn_num'] % 2 == 0 else 'black'
+        player = "white" if fen.split()[1]== 'w' else "black"
         result = 1. if data['winner'] == player else -1.
 
         # Convert FEN state and move to tensors
@@ -159,15 +159,17 @@ if __name__ == '__main__':
                  # "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-white.pgn"]  # Replace with your PGN file paths
 
     # Initialize dataset with multiple CSV and PGN files
+    batch_size = 32
     chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, pickle_file='data/game.pkl')
-    dataloader = DataLoader(chess_dataset, batch_size=64, shuffle=True  , num_workers=3)
+    np.random.shuffle(chess_dataset.games)
+    dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=3)
 
     idx = 0
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16, init_lr=0.00005)
 
     import matplotlib.pyplot as plt
 
-    print(f"Data points: {len(chess_dataset.games)} Batches: {len(chess_dataset.games)//64}")
+    print(f"Data points: {len(chess_dataset.games)} Batches: {len(chess_dataset.games)//batch_size}")
 
     # Initialize the live plot
     plt.ion()  # Turn on interactive mode
@@ -216,7 +218,7 @@ if __name__ == '__main__':
                 # Save the model if this is the best rolling average
                 if rolling_avg < best_rolling_avg:
                     best_rolling_avg = rolling_avg
-                    torch.save(chess_net.state_dict(), f"best_model_{epoch}.pt")
+                    torch.save(chess_net.state_dict(), f"networks/best_model_{epoch}.pt")
                     print(f"New best model saved with rolling avg loss: {best_rolling_avg:.4f}")
 
             # Update the plot

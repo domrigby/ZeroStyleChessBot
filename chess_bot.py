@@ -32,17 +32,23 @@ if __name__ == '__main__':
         print(f"Time with parallel search {end_time-start_time:.3f}")
 
         #TODO: sort out now visiting
-        print(sum([edge.N for edge in tree.root.edges]))
 
-        node, move = tree.root.select_new_root_node()
+        if ctr < 30:
+            tau = 1.
+        else:
+            tau = 0.1
+
+        node, move = tree.root.select_new_root_node(tau=tau)
 
         chess_move = chess.Move.from_uci(move)
         main_board.push(chess_move)
         svg = chess.svg.board(board=main_board, arrows=[chess.svg.Arrow(chess_move.from_square, chess_move.to_square,
                                                                         color="#0000cccc")])
 
-        print('\n', svg)
-        print(main_board.is_game_over())
+        print('\n', main_board)
+
+        print([(edge.move, edge.N, edge.Q.item()) for edge in tree.root.edges])
+        print(sum([edge.N for edge in tree.root.edges]))
 
         with open(f"save_game/move_{ctr}.svg", "w") as file:
             file.write(svg)

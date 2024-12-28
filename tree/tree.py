@@ -89,8 +89,6 @@ class GameTree:
                 self.backpropagation(visited_edges, reward)
 
 
-
-
             self.search_for_sufficiently_visited_nodes(self.root)
 
         self.nodes = ThreadLocalNodePool(self.num_workers, number_of_expansions//self.num_workers)
@@ -115,12 +113,20 @@ class GameTree:
 
         gamma_factor = 1
 
+        player = visited_edges[-1].parent_node.player
+
         for edge in reversed(visited_edges):
 
             with edge.lock:
 
+                if edge.parent_node.player == player:
+                    # Flip for when the other player is observing reward
+                    flip = 1
+                else:
+                    flip = -1
+
                 edge.N += 1
-                edge.W += gamma_factor * observed_reward
+                edge.W += gamma_factor * flip * observed_reward
 
                 # Unlock the edge for further exploration
                 edge.virtual_loss = 0
@@ -185,6 +191,7 @@ class Node:
             # Initialise empty forms of the class
             self.state: board.fen = None  # The chess fen string object representing this state
             self.parent_edge: Edge = None
+            self.player = None
 
             self.number_legal_moves: int = 0
             self.branch_complete = False  # Flag to indicate if the branch has been fully searched
@@ -196,6 +203,8 @@ class Node:
     def re_init(self, state:str, board, parent_edge=None):
 
         self.state = state  # The chess fen string object representing this state
+        self.player = self.state.split()[1]
+        assert self.player in ['w', 'b'], ValueError('Player must be w or b')
 
         self.parent_edge = parent_edge  # Reference to the parent edge
 
@@ -229,9 +238,10 @@ class Node:
         visits = np.sum([edge.N for edge in self.edges])
         return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * np.sqrt(visits + 1) / (edge.N + 1)))
 
-    def select_new_root_node(self):
+    def select_new_root_node(self, tau: float = 1.0):
         Ns = np.array([edge.N for edge in self.edges])
-        probs = Ns / np.sum(Ns)
+        N_to_tau = np.power(Ns, 1./tau)
+        probs = N_to_tau / np.sum(N_to_tau)
         chosen_edge = np.random.choice(self.edges, p=probs)
         return chosen_edge.child_node, chosen_edge.move
 
