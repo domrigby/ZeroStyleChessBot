@@ -6,6 +6,11 @@ import torch
 from functools import wraps
 import os
 
+import chess_moves
+import numpy as np
+
+chess_engine = chess_moves.ChessEngine()
+
 def check_input(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -24,10 +29,15 @@ def check_input(func):
 
 class GenericNet(nn.Module):
 
-    def __init__(self, init_lr: float = 0.001, save_dir: str = 'networks'):
+    def __init__(self, input_size: tuple, output_size: tuple, init_lr: float = 0.001, save_dir: str = 'networks'):
 
         # Initialise nn Module
         super().__init__()
+
+        # Control inputs and outputs
+        self.input_size = input_size
+        self.output_size = output_size
+
 
         self.save_dir = save_dir
 
@@ -65,6 +75,50 @@ class GenericNet(nn.Module):
         if filename is None:
             filename = os.path.join(self.save_dir, self.__class__.__name__) + '.pt'
         self.load_state_dict(torch.load(filename))
+
+    def create_legal_move_mask(self, edges):
+        # Create a tensor with all zeros, then set the indices corresponding to legal moves to 1
+        legal_move_mask = torch.zeros(self.output_size)
+        move_to_indices_lookup = []
+
+
+        for legal_move in edges:
+            # Need to add pawn promotion
+            if len(str(legal_move)) < 5:
+                indices = chess_engine.move_to_target_indices(str(legal_move))
+                legal_move_mask[indices] = 1
+                move_to_indices_lookup.append([legal_move, indices])
+
+        return legal_move_mask, move_to_indices_lookup
+
+    @staticmethod
+    def get_move_from_tensor(tensor):
+        # Returns the argmax move from the tensor
+        channel = np.argmax(tensor) // (8 * 8)
+        flat_index = np.argmax(tensor) % (8 * 8)
+        from_row = flat_index // 8
+        from_col = flat_index % 8
+
+        return chess_engine.indices_to_move(channel, from_row, from_col)
+
+    @staticmethod
+    def board_to_tensor(board):
+        fen = board.fen()
+        return chess_engine.fen_to_tensor(fen)
+
+    def node_evaluation(self, node):
+        self.eval()
+        with torch.no_grad():
+            legal_move_mask, index_map = self.create_legal_move_mask(node.edges)
+            board_tensor = chess_engine.fen_to_tensor(node.state)
+            value, policy = self(torch.tensor(board_tensor, dtype=torch.float32, device='cuda').unsqueeze(0),
+                                      legal_move_mask)
+
+        for edge, index in index_map:
+            edge.P = policy[0][index]
+
+        return value
+
 
 class ConvBlock(nn.Module):
 

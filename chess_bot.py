@@ -1,17 +1,30 @@
 import chess
+import chess.svg
 import chess_moves
 from tree.tree import GameTree
 
+import svgwrite
+
+from neural_nets.conv_net import ChessNet
+
 if __name__ == '__main__':
 
-    tree = GameTree(chess_moves.ChessEngine, num_threads=1)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16)
+    chess_net.load_network(r"/home/dom/Code/chess_bot/neural_nets/session/best_model_120.pt")
+    chess_net.eval()
 
-    sims = 25000
+    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net)
+
+    sims = 250
 
     node = tree.root
 
+    main_board = chess.Board()
+
     import time
-    for _ in range(10):
+    ctr = 0
+
+    while not main_board.is_game_over():
         start_time = time.time()
         tree.parallel_search(current_node=node,number_of_expansions=sims)
         end_time = time.time()
@@ -21,5 +34,34 @@ if __name__ == '__main__':
         #TODO: sort out now visiting
         print(sum([edge.N for edge in tree.root.edges]))
 
-        node = tree.root.select_new_root_node()
+        node, move = tree.root.select_new_root_node()
+
+        chess_move = chess.Move.from_uci(move)
+        main_board.push(chess_move)
+        svg = chess.svg.board(board=main_board, arrows=[chess.svg.Arrow(chess_move.from_square, chess_move.to_square,
+                                                                        color="#0000cccc")])
+
+        print('\n', svg)
+        print(main_board.is_game_over())
+
+        with open(f"save_game/move_{ctr}.svg", "w") as file:
+            file.write(svg)
+
+        print(f"Move: {move}")
+        print('\n')
         tree.root = node
+
+        if main_board.is_checkmate():
+            print("Checkmate!")
+            break
+        elif main_board.is_stalemate():
+            print("Stalemate!")
+            break
+        elif main_board.is_insufficient_material():
+            print("Insufficient material to checkmate!")
+            break
+        elif main_board.is_check():
+            print("King is in check!")
+
+        ctr += 1
+

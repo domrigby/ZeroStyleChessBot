@@ -3,6 +3,8 @@ import chess.engine
 import numpy as np
 import torch
 import chess_moves
+from cpp_chess_env.chess_funcs import get_move_from_tensor, board_to_tensor
+
 from neural_nets.conv_net import ChessNet
 
 # Initialize chess engine and neural network
@@ -15,20 +17,6 @@ chess_net.eval()
 # Initialize the chess board
 board = chess.Board()
 
-def board_to_tensor(board, chess_engine):
-    fen = board.fen()
-    return chess_engine.fen_to_tensor(fen)
-
-def get_move_from_tensor(tensor, chess_engine):
-    channel = np.argmax(tensor) // (8 * 8)
-    flat_index = np.argmax(tensor) % (8 * 8)
-    from_row = flat_index // 8
-    from_col = flat_index % 8
-
-    print(f"Move prob: {tensor[channel, from_row, from_col]}")
-
-    return chess_engine.indices_to_move(channel, from_row, from_col)
-
 counter = 0
 
 # Play a game where the network plays itself
@@ -38,7 +26,7 @@ while not board.is_game_over():
     print(f"Move number: {counter}")
 
     # Convert the board to tensor
-    board_tensor = board_to_tensor(board, chess_engine)
+    board_tensor = board_to_tensor(board)
 
     legal_moves = board.legal_moves
     legal_move_mask = torch.zeros([66, 8, 8], dtype=torch.int)
@@ -51,7 +39,7 @@ while not board.is_game_over():
     with torch.no_grad():
         output_tensor = chess_net(torch.tensor(board_tensor, dtype=torch.float32, device='cuda').unsqueeze(0),
                                   legal_move_mask)
-    move_str = get_move_from_tensor(output_tensor[1].cpu().numpy().squeeze(), chess_engine)
+    move_str = get_move_from_tensor(output_tensor[1].cpu().numpy().squeeze())
 
     try:
         # Apply the move to the board

@@ -2,14 +2,12 @@ from neural_nets.generic_net import GenericNet, ConvBlock, check_input
 from torch import nn
 import torch
 
+
+
 class ChessNet(GenericNet):
 
-    def __init__(self, input_size: tuple, output_size: tuple, *args, num_filters: int = 64, num_repeats: int= 6,
+    def __init__(self, *args, num_filters: int = 64, num_repeats: int= 6,
                  **kwargs):
-
-        # Control inputs and outputs
-        self.input_size = input_size
-        self.output_size = output_size
 
         # Control convolution parameters
         self.num_filters = num_filters
@@ -98,6 +96,20 @@ class ChessNet(GenericNet):
         self.optimiser.step()
 
         return total_loss
+
+    def make_prediction(self, state, legal_move_mask):
+
+        # Not training
+        self.eval()
+
+        with torch.no_grad():
+
+            # Get the policy and value
+            value, policy = self(state)
+
+            # Now need to convert these tensors back to their corresponding move
+
+            return value.item(), best_move
 
 
 

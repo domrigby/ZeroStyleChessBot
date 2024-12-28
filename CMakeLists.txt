@@ -7,4 +7,4 @@ set(pybind11_DIR "/home/dom/.local/lib/python3.11/site-packages/pybind11/share/c
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 find_package(pybind11 REQUIRED)
 
-pybind11_add_module(chess_moves engine_c/new_engine.cpp)
+pybind11_add_module(chess_moves cpp_chess_env/new_engine.cpp)

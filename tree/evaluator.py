@@ -5,7 +5,7 @@ import chess_moves
 class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallelwith MCTS"""
 
-    def __init__(self, queue, lock):
+    def __init__(self, neural_network, queue, lock):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -15,26 +15,28 @@ class NeuralNetHandling(Process):
         self.lock = lock
         self.running = True
 
+        self.neural_network = neural_network
+
     def run(self):
+        # If there are states in the qy
         while self.running:
             if not self.queue.empty():
-                states_to_evaluate = []
-                while not self.queue.empty():
-                    states_to_evaluate.append(self.queue.get())
-
-                # Batch process states with the neural network
+                # Process inference
+                states_to_evaluate = [self.queue.get() for _ in range(min(self.queue.qsize(), self.batch_size))]
                 evaluations = self.evaluate_batch([state['fen'] for state in states_to_evaluate])
 
-                # Write results back to the nodes/edges
+                # Update nodes/edges with evaluations
                 for state, eval in zip(states_to_evaluate, evaluations):
-                    with self.lock:
-                        edge = state['edge']
-                        edge.W += eval['value']
-                        edge.N += 1
-                        for move, prob in eval['policy'].items():
-                            matching_edge = next(e for e in state['node'].edges if e.move == move)
-                            matching_edge.W += prob
+                    self.update_node_and_edges(state, eval)
 
+            self.train_neural_network()
+                
+    def train_neural_network(self):
+        pass
+
+    def update_node_and_edges(self, state, evaluation):
+        pass
+                
     def evaluate_batch(self, states):
         """
         Simulate neural network evaluation. Replace this with actual model inference.

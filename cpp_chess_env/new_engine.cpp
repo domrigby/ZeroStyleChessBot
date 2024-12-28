@@ -17,10 +17,107 @@ public:
         parse_fen(fen);
     }
 
-    std::vector<std::string> get_legal_moves() {
-        std::vector<std::string> moves;
-        generate_moves(moves);
-        return moves;
+        std::vector<std::string> get_legal_moves() {
+        // Generate all pseudo-legal moves
+        std::vector<std::string> pseudo_moves;
+        generate_moves(pseudo_moves);
+
+        std::vector<std::string> legal_moves;
+        bool sideToMove = white_to_move; // Side whose king we are checking
+
+        // Check each pseudo-legal move
+        for (const auto& mv : pseudo_moves) {
+            char captured = apply_move_with_capture(mv);
+
+            // Only add the move if it doesn't leave the king in check
+            if (!is_king_in_check(sideToMove)) {
+                legal_moves.push_back(mv);
+            }
+
+            undo_move(mv, captured);
+        }
+
+        return legal_moves;
+    }
+
+    bool is_king_in_check(bool sideToCheck) {
+        // Determine which king to check for
+        char kingSymbol = sideToCheck ? 'K' : 'k';
+
+        // Find the king's position
+        int kingRow = -1, kingCol = -1;
+        for (int r = 0; r < 8; ++r) {
+            for (int c = 0; c < 8; ++c) {
+                if (board[r][c] == kingSymbol) {
+                    kingRow = r;
+                    kingCol = c;
+                    break;
+                }
+            }
+            if (kingRow != -1) break;
+        }
+
+        // If the king is not found (invalid board state), assume not in check
+        if (kingRow == -1) {
+            return false;
+        }
+
+        // Temporarily switch to the opponent's side to generate their moves
+        bool savedSide = white_to_move;
+        white_to_move = !sideToCheck;
+        std::vector<std::string> opponentMoves;
+        generate_moves(opponentMoves);
+        white_to_move = savedSide;
+
+        // Check if any opponent move attacks the king's position
+        for (const auto& mv : opponentMoves) {
+            int toRow = '8' - mv[3];
+            int toCol = mv[2] - 'a';
+            if (toRow == kingRow && toCol == kingCol) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    char apply_move_with_capture(const std::string& move) {
+        int fromCol = move[0] - 'a';
+        int fromRow = '8' - move[1];
+        int toCol   = move[2] - 'a';
+        int toRow   = '8' - move[3];
+
+        // Save the captured piece
+        char captured = board[toRow][toCol];
+
+        // Apply the move
+        board[toRow][toCol] = board[fromRow][fromCol];
+        board[fromRow][fromCol] = '.';
+
+        // Update game state
+        if (!white_to_move) {
+            fullmove_number++;
+        }
+        white_to_move = !white_to_move;
+
+        return captured;
+    }
+
+    void undo_move(const std::string& move, char captured) {
+        int fromCol = move[0] - 'a';
+        int fromRow = '8' - move[1];
+        int toCol   = move[2] - 'a';
+        int toRow   = '8' - move[3];
+
+        // Revert the move
+        board[fromRow][fromCol] = board[toRow][toCol];
+        board[toRow][toCol] = captured;
+
+        // Restore game state
+        white_to_move = !white_to_move;
+        if (!white_to_move) {
+            fullmove_number--;
+        }
     }
 
     std::string make_move(const std::string& fen, const std::string& move) {

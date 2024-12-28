@@ -3,10 +3,8 @@ import numpy as np
 from numpy.random import default_rng
 
 # You need to build the C++ bit first
-import os
 import chess_moves
-
-from copy import copy
+import torch
 
 import threading
 from queue import Queue, SimpleQueue
@@ -15,15 +13,15 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from line_profiler import profile
 
-import gc
-from numba import jit
 
 from tree.memory import Memory
+from neural_nets.conv_net import ChessNet
 
 
 class GameTree:
     def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
-                 start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
+                 start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                 neural_net = None):
 
         if env_kwargs is None:
             env_kwargs = {}
@@ -42,39 +40,7 @@ class GameTree:
         self.lock = threading.Lock()
         self.num_workers = num_threads
 
-    def search_down_tree(self, num_expands: int):
-
-        for idx in range(num_expands):
-            self.expand_the_tree(self.root)
-
-    def expand_the_tree(self, current_node):
-
-        # Create bool for while loop
-        leaf = False
-
-        # Create list of visited edges
-        visited_edges: List[Edge] = []
-
-        while not leaf:
-
-            # Select the best child node according to PUCT
-            edge = current_node.puct()
-
-            # Add current node to the list of visited nodes
-            visited_edges.append(edge)
-
-            if edge.child_node is None:
-                # If the node has no children, it's a leaf
-                leaf = True
-                # Set board to correct state with the nodes FEN
-                self.envs[0].set_position(current_node.state)
-                current_node, reward, done = edge.expand(self.envs[0])
-                self.nodes.append(current_node)
-            else:
-                # Else carry on searching
-                current_node = edge.child_node
-
-        self.backpropagation(visited_edges, reward)
+        self.neural_net = neural_net
 
     def parallel_search(self, current_node = None, number_of_expansions: int = 1000):
 
@@ -112,9 +78,18 @@ class GameTree:
                         edge = current_node.puct(rng_generator=thread_rng)
 
                 current_node, reward, done = edge.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
-                self.backpropagation(visited_edges, reward)
 
                 current_node = self.root
+
+                if self.neural_net:
+                    value = self.neural_net.node_evaluation(current_node)
+                    reward += value
+                    reward /= 2
+
+                self.backpropagation(visited_edges, reward)
+
+
+
 
             self.search_for_sufficiently_visited_nodes(self.root)
 
@@ -242,6 +217,10 @@ class Node:
             else:
                 self.edges.append(Edge(self, move))
 
+        if self.number_legal_moves < len(self.edges):
+            # Get rid of excess edges
+            self.edges = self.edges[:self.number_legal_moves]
+
         self.has_policy = False
 
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
@@ -253,7 +232,11 @@ class Node:
     def select_new_root_node(self):
         Ns = np.array([edge.N for edge in self.edges])
         probs = Ns / np.sum(Ns)
-        return np.random.choice(self.edges, p=probs).child_node
+        chosen_edge = np.random.choice(self.edges, p=probs)
+        return chosen_edge.child_node, chosen_edge.move
+
+    def apply_policy(self, state_tensor: torch.tensor):
+        pass
 
 class Edge:
 
@@ -278,6 +261,9 @@ class Edge:
     def re_init(self, parent_node, move):
         self.parent_node = parent_node
         self.move = move
+
+    def __str__(self):
+        return str(self.move)
 
     @profile
     def expand(self, board: chess.Board, state: str = None, node_queue: Queue = None, thread_num: int = 0):
@@ -314,7 +300,11 @@ class Edge:
 #
 if __name__ == '__main__':
 
-    tree = GameTree(chess_moves.ChessEngine, num_threads=1)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16)
+    chess_net.load_network(r"/home/dom/Code/chess_bot/neural_nets/session/best_model_120.pt")
+    chess_net.eval()
+
+    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net)
 
     sims = 25000
 
