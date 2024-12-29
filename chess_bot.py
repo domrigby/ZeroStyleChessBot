@@ -3,15 +3,16 @@ import chess.svg
 import chess_moves
 from tree.tree import GameTree
 
-import svgwrite
 
 from neural_nets.conv_net import ChessNet
 
 if __name__ == '__main__':
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16)
-    chess_net.load_network(r"/home/dom/Code/chess_bot/neural_nets/session/best_model_120.pt")
+    # chess_net.load_network(r"/home/dom/Code/chess_bot/neural_nets/session/best_model_120.pt")
+    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_0.pt")
     chess_net.eval()
+
 
     tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net)
 
@@ -47,13 +48,14 @@ if __name__ == '__main__':
 
         print('\n', main_board)
 
-        print([(edge.move, edge.N, edge.Q.item()) for edge in tree.root.edges])
+        print([(edge.move, edge.P.item()) for edge in tree.root.edges])
         print(sum([edge.N for edge in tree.root.edges]))
 
         with open(f"save_game/move_{ctr}.svg", "w") as file:
             file.write(svg)
 
         print(f"Move: {move}")
+        print(f"Game over: {main_board.is_game_over()}")
         print('\n')
         tree.root = node
 

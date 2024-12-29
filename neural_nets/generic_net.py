@@ -38,7 +38,6 @@ class GenericNet(nn.Module):
         self.input_size = input_size
         self.output_size = output_size
 
-
         self.save_dir = save_dir
 
         if not os.path.exists(self.save_dir):
@@ -81,7 +80,6 @@ class GenericNet(nn.Module):
         legal_move_mask = torch.zeros(self.output_size)
         move_to_indices_lookup = []
 
-
         for legal_move in edges:
             # Need to add pawn promotion
             if len(str(legal_move)) < 5:
@@ -118,6 +116,26 @@ class GenericNet(nn.Module):
             edge.P = policy[0][index]
 
         return value
+
+    def tensorise_batch(self, states, moves, probabilities, wins):
+
+        state_tens = torch.zeros((len(states), *self.input_size), device=self.device)
+        moves_tens = torch.zeros((len(moves), *self.output_size), device=self.device)
+        legal_move_mask = torch.zeros((len(moves), *self.output_size), device=self.device)
+        value_tens = torch.zeros((len(wins), 1), device=self.device)
+
+        for idx, (state, move_set, win) in enumerate(zip(states, moves, probabilities, wins)):
+            state_tens[idx] = self.board_to_tensor(state)
+
+            for move, prob in zip(move_set, probabilities):
+                indices = chess_engine.move_to_target_indices(str(move))
+                moves_tens[idx][indices] = prob
+
+            legal_move_mask[idx] = self.create_legal_move_mask(move_set)
+
+            value_tens[idx] = torch.tensor([win], device=self.device)
+
+        return state_tens, moves_tens, value_tens
 
 
 class ConvBlock(nn.Module):

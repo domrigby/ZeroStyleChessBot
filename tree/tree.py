@@ -6,13 +6,12 @@ from numpy.random import default_rng
 import chess_moves
 import torch
 
-import threading
+from multiprocessing import Process, Manager #, Lock
+from threading import Lock
 from queue import Queue, SimpleQueue
-from concurrent.futures import ThreadPoolExecutor
 
 from typing import List
 from line_profiler import profile
-
 
 from tree.memory import Memory
 from neural_nets.conv_net import ChessNet
@@ -21,7 +20,7 @@ from neural_nets.conv_net import ChessNet
 class GameTree:
     def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                 neural_net = None):
+                 neural_net = None, manager: Manager = None, training: bool =  False):
 
         if env_kwargs is None:
             env_kwargs = {}
@@ -37,10 +36,20 @@ class GameTree:
 
         # Create the queues
         self.state_queue = SimpleQueue()
-        self.lock = threading.Lock()
+        self.lock = Lock()
         self.num_workers = num_threads
 
         self.neural_net = neural_net
+
+        # Give this the manager object
+        self.manager = manager
+
+        # Training switch
+        self.training = training
+
+        # if self.training:
+        #     self.evaluator = Evaluator(queue=self.state_queue, lock=self.lock, neural_network=self.neural_net)
+        #     self.evaluator.start()
 
     def parallel_search(self, current_node = None, number_of_expansions: int = 1000):
 
@@ -77,6 +86,9 @@ class GameTree:
                     if not current_node.branch_complete:
                         edge = current_node.puct(rng_generator=thread_rng)
 
+                    if self.training and idx % 30 == 0:
+                        self.train_neural_network()
+
                 current_node, reward, done = edge.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
 
                 current_node = self.root
@@ -97,16 +109,6 @@ class GameTree:
 
         search_down_tree(self.env, number_of_expansions // self.num_workers, current_node, 0)
 
-        # TODO: change the to multiprocess with shared memory tree... stupidly misread the thread GIL relation
-        # with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
-        #
-        #     ship
-        #     futures = [executor.submit(search_down_tree, self.env, number_of_expansions//self.num_workers,
-        #                                current_node, thread_num)
-        #                for thread_num in range(self.num_workers)]
-        #
-        #     for future in futures:
-        #         future.result()
 
 
     def backpropagation(self, visited_edges, observed_reward: float):
@@ -142,7 +144,7 @@ class GameTree:
                 return
 
             for edge in node.edges:
-                if edge.N >= 500:
+                if edge.N >= 100:
                     recursive_search(edge.child_node)
 
             return
@@ -156,6 +158,16 @@ class GameTree:
         visit_counts = [edge.N for edge in current_node.edges]
 
         self.memory.save_state_to_moves(state, moves, visit_counts)
+
+    def train_neural_network(self):
+        if len(self.memory) < 32 or self.memory.games_played < 1:
+            return
+        states, moves, probs, wins = self.memory.get_batch(32)
+        state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
+        self.neural_net.train_batch(state, target=(wins, moves), legal_move_mask=legal_move_mask)
+
+    def end_game(self):
+        self.memory.end_game()
 
 
 class ThreadLocalNodePool:
@@ -181,7 +193,7 @@ class Node:
     DEFAULT_EDGE_NUM = 24
     def __init__(self, board=None, parent_edge=None, state=None):
 
-        self.lock = threading.Lock()
+        self.lock = Lock()
 
         if board is not None:
             # TODO: sort out edge initialisation
@@ -236,7 +248,7 @@ class Node:
         #TODO sort puct out with the locks
         # Do all puct stuff in one go so that other threads cant edit it whilst
         visits = np.sum([edge.N for edge in self.edges])
-        return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * np.sqrt(visits + 1) / (edge.N + 1)))
+        return max(self.edges, key=lambda edge: ((edge.Q + edge.virtual_loss) + 5.0 * edge.P * np.sqrt(visits + 1) / (edge.N + 1)))
 
     def select_new_root_node(self, tau: float = 1.0):
         Ns = np.array([edge.N for edge in self.edges])
@@ -263,10 +275,11 @@ class Edge:
         # Game statistics
         self.W = 0.
         self.N = 0.
+        self.P = 1.
 
         # Multi-processing variables
         self.virtual_loss = 0
-        self.lock = threading.Lock()
+        self.lock = Lock()
 
     def re_init(self, parent_node, move):
         self.parent_node = parent_node

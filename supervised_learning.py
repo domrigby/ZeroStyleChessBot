@@ -30,12 +30,12 @@ class ChessDataset(Dataset):
 
         if csv_paths or pgn_paths:
             # Save self.games to a file
-            with open("data/games.pkl", "wb") as f:
+            with open("neural_nets/data/games.pkl", "wb") as f:
                 pickle.dump(self.games, f)
 
         if pickle_file:
             # Load self.games from a file
-            with open("data/games.pkl", "rb") as f:
+            with open("neural_nets/data/games.pkl", "rb") as f:
                 self.games = pickle.load(f)
 
     def load_csv(self, csv_path):
@@ -162,7 +162,7 @@ if __name__ == '__main__':
     batch_size = 32
     chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, pickle_file='data/game.pkl')
     np.random.shuffle(chess_dataset.games)
-    dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=3)
+    dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
 
     idx = 0
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16, init_lr=0.00005)
@@ -179,9 +179,9 @@ if __name__ == '__main__':
     epochs = []
     rolling_avg_epochs = []  # Track epochs for rolling averages
 
-    line, = ax.plot([], [], linestyle='-', label="Batch Loss")  # Line for batch loss
+    # line, = ax.plot([], [], linestyle='-', label="Batch Loss")  # Line for batch loss
     rolling_avg_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg")
-    ax.set_title("Training Loss (Live Update)")
+    ax.set_title("Training Loss")
     ax.set_xlabel("Batch")
     ax.set_ylabel("Loss")
     ax.grid(True)
@@ -193,7 +193,10 @@ if __name__ == '__main__':
     # Training loop
     rolling_window = 100
     batch_counter = 0
+
+
     for epoch in range(10000):
+
         for batch in dataloader:
             state_tensor = batch['state']
             move_target_tensor = batch['move']
@@ -222,19 +225,18 @@ if __name__ == '__main__':
                     print(f"New best model saved with rolling avg loss: {best_rolling_avg:.4f}")
 
             # Update the plot
-            line.set_xdata(epochs)
-            line.set_ydata(loss_values)
 
             # Update the rolling average plot only if values exist
             if rolling_avg_values:
                 rolling_avg_line.set_xdata(rolling_avg_epochs)
                 rolling_avg_line.set_ydata(rolling_avg_values)
 
-            ax.set_xlim(0, batch_counter)  # Update x-axis limit
-            ax.set_ylim(0, max(max(loss_values), max(rolling_avg_values, default=0)) * 1.1)  # Update y-axis limit
+            if batch_counter % 100 == 0:
+                ax.set_xlim(0, batch_counter)  # Update x-axis limit
+                ax.set_ylim(0, max(rolling_avg_values, default=0) * 1.1)  # Update y-axis limit
 
-            plt.draw()
-            plt.pause(0.01)  # Pause briefly to update the plot
+                plt.draw()
+                plt.pause(0.01)  # Pause briefly to update the plot
 
             print(f"\rEpoch {epoch}: Batch {batch_counter}", end="")
 
