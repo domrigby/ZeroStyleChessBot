@@ -2,13 +2,12 @@ from torch.utils.data import Dataset, DataLoader
 from typing import List
 import numpy as np
 from enum import Enum
+import pickle as pkl
 
 
 class Turn(Enum):
     BLACK = 'black'
     WHITE ='white'
-
-
 
 
 class DataPoint:
@@ -22,7 +21,7 @@ class DataPoint:
 
 class Memory:
 
-    def __init__(self, length_buffer):
+    def __init__(self, length_buffer, preload_data: str = None):
 
         # Save the states
         self.data: List[DataPoint] = []
@@ -33,6 +32,11 @@ class Memory:
         self.index = 0
 
         self.games_played = 0
+
+        self.max_len = length_buffer
+
+        if preload_data is not None:
+            self.load_data(preload_data)
 
     def __len__(self):
         return len(self.data)
@@ -82,3 +86,25 @@ class Memory:
         # Empty list
         self.turn_list = []
         self.games_played += 1
+
+    def load_data(self, path: str, sample_size: int = 10000):
+        # Slow but we only do it once
+        with open("neural_nets/data/games.pkl", "rb") as f:
+            moves = pkl.load(f)
+
+        moves = np.random.choice(moves, sample_size)
+
+        for idx, move in enumerate(moves):
+            probs = []
+            for legal_move in move['legal_moves']:
+                if legal_move == move['move']:
+                    probs.append(1.)
+                else:
+                    probs.append(0.)
+
+            data_point = DataPoint(move['state'], move['legal_moves'], probs)
+
+            if len(self.data) < sample_size:
+                self.data.append(data_point)
+            else:
+                self.data[idx] = data_point

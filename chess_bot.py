@@ -10,13 +10,12 @@ if __name__ == '__main__':
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16)
     # chess_net.load_network(r"/home/dom/Code/chess_bot/neural_nets/session/best_model_120.pt")
-    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_0.pt")
+    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_19.pt")
     chess_net.eval()
-
 
     tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net)
 
-    sims = 250
+    sims = 1000
 
     node = tree.root
 
@@ -46,7 +45,8 @@ if __name__ == '__main__':
         svg = chess.svg.board(board=main_board, arrows=[chess.svg.Arrow(chess_move.from_square, chess_move.to_square,
                                                                         color="#0000cccc")])
 
-        print('\n', main_board)
+        print('\n')
+        print(main_board)
 
         print([(edge.move, edge.P.item()) for edge in tree.root.edges])
         print(sum([edge.N for edge in tree.root.edges]))

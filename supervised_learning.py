@@ -11,7 +11,7 @@ import os
 from neural_nets.conv_net import ChessNet
 
 class ChessDataset(Dataset):
-    def __init__(self, csv_paths=None, pgn_paths=None, pickle_file=None):
+    def __init__(self, csv_paths=None, pgn_paths=None, pickle_file=None, sample_size: int= 100000):
         """
         Initialize the dataset with data from multiple CSV and PGN files.
         """
@@ -34,9 +34,15 @@ class ChessDataset(Dataset):
                 pickle.dump(self.games, f)
 
         if pickle_file:
-            # Load self.games from a file
-            with open("neural_nets/data/games.pkl", "rb") as f:
-                self.games = pickle.load(f)
+           self.load_pickled_file(sample_size=sample_size)
+
+    def load_pickled_file(self, path: str = "neural_nets/data/games.pkl", sample_size: int = None):
+        with open(path, "rb") as f:
+            loaded_games = pickle.load(f)
+            if sample_size:
+                loaded_games = np.random.choice(loaded_games, sample_size)
+            self.games = loaded_games
+
 
     def load_csv(self, csv_path):
         """
@@ -79,7 +85,6 @@ class ChessDataset(Dataset):
         Precompute FEN states and moves for a single game and add to the dataset.
         """
         board = chess.Board()
-        game_data = []
 
         if len(moves) < 5:
             # Skip this game
@@ -129,7 +134,13 @@ class ChessDataset(Dataset):
 
         # Determine the result for the player
         player = "white" if fen.split()[1]== 'w' else "black"
-        result = 1. if data['winner'] == player else -1.
+
+        if data['winner'] == player:
+            result = 1
+        elif data['winner'] == "draw":
+            result = 0
+        else:
+            result = -1
 
         # Convert FEN state and move to tensors
         board_tensor = self.chess_engine.fen_to_tensor(fen)
@@ -161,15 +172,11 @@ if __name__ == '__main__':
     # Initialize dataset with multiple CSV and PGN files
     batch_size = 32
     chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, pickle_file='data/game.pkl')
-    np.random.shuffle(chess_dataset.games)
-    dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
 
     idx = 0
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16, init_lr=0.00005)
 
     import matplotlib.pyplot as plt
-
-    print(f"Data points: {len(chess_dataset.games)} Batches: {len(chess_dataset.games)//batch_size}")
 
     # Initialize the live plot
     plt.ion()  # Turn on interactive mode
@@ -196,6 +203,11 @@ if __name__ == '__main__':
 
 
     for epoch in range(10000):
+
+        chess_dataset.load_pickled_file(sample_size=100000)
+        dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
+
+        print(f"Data points: {len(chess_dataset.games)} Batches: {len(chess_dataset.games) // batch_size}")
 
         for batch in dataloader:
             state_tensor = batch['state']

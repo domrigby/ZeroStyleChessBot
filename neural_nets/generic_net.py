@@ -119,24 +119,36 @@ class GenericNet(nn.Module):
 
     def tensorise_batch(self, states, moves, probabilities, wins):
 
-        state_tens = torch.zeros((len(states), *self.input_size), device=self.device)
+        # re-use input only tensorise
+        state_tens, legal_move_mask = self.tensorise_input(states, moves)
+
+        # init tensors to fill
         moves_tens = torch.zeros((len(moves), *self.output_size), device=self.device)
-        legal_move_mask = torch.zeros((len(moves), *self.output_size), device=self.device)
         value_tens = torch.zeros((len(wins), 1), device=self.device)
 
         for idx, (state, move_set, win) in enumerate(zip(states, moves, probabilities, wins)):
-            state_tens[idx] = self.board_to_tensor(state)
 
             for move, prob in zip(move_set, probabilities):
                 indices = chess_engine.move_to_target_indices(str(move))
                 moves_tens[idx][indices] = prob
 
-            legal_move_mask[idx] = self.create_legal_move_mask(move_set)
-
             value_tens[idx] = torch.tensor([win], device=self.device)
 
         return state_tens, moves_tens, value_tens
 
+    def tensorise_inputs(self, states, legal_moves):
+
+        state_tens = torch.zeros((len(states), *self.input_size), device=self.device)
+        legal_move_mask = torch.zeros((len(legal_moves), *self.output_size), device=self.device)
+        legal_move_keys = []
+
+        for idx, (state, move_set) in enumerate(zip(states, legal_moves)):
+            state_tens[idx] = self.board_to_tensor(state)
+            legal_move_mask[idx], key = self.create_legal_move_mask(move_set)
+
+            legal_move_keys.append(key)
+
+        return state_tens, legal_move_mask, legal_move_keys
 
 class ConvBlock(nn.Module):
 

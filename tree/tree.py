@@ -20,7 +20,8 @@ from neural_nets.conv_net import ChessNet
 class GameTree:
     def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                 neural_net = None, manager: Manager = None, training: bool =  False):
+                 neural_net = None, manager: Manager = None, training: bool =  False,
+                 multiprocess: bool = False):
 
         if env_kwargs is None:
             env_kwargs = {}
@@ -32,11 +33,7 @@ class GameTree:
         self.root = Node(self.env(), state=start_state)
         self.nodes: List[Node] = []
 
-        self.memory = Memory(100000)
-
         # Create the queues
-        self.state_queue = SimpleQueue()
-        self.lock = Lock()
         self.num_workers = num_threads
 
         self.neural_net = neural_net
@@ -46,10 +43,18 @@ class GameTree:
 
         # Training switch
         self.training = training
+        self.multiprocess = multiprocess
+
+        if not self.multiprocess:
+            self.memory = Memory(100000, preload_data="/home/dom/Code/chess_bot/neural_nets/data/games.pkl")
 
         # if self.training:
         #     self.evaluator = Evaluator(queue=self.state_queue, lock=self.lock, neural_network=self.neural_net)
         #     self.evaluator.start()
+
+    def reset(self):
+        self.root = Node(self.env(), state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+        self.nodes = []
 
     def parallel_search(self, current_node = None, number_of_expansions: int = 1000):
 
@@ -87,7 +92,7 @@ class GameTree:
                         edge = current_node.puct(rng_generator=thread_rng)
 
                     if self.training and idx % 30 == 0:
-                        self.train_neural_network()
+                        self.train_neural_network_local()
 
                 current_node, reward, done = edge.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
 
@@ -99,7 +104,6 @@ class GameTree:
                     reward /= 2
 
                 self.backpropagation(visited_edges, reward)
-
 
             self.search_for_sufficiently_visited_nodes(self.root)
 
@@ -144,7 +148,7 @@ class GameTree:
                 return
 
             for edge in node.edges:
-                if edge.N >= 100:
+                if edge.N >= 250:
                     recursive_search(edge.child_node)
 
             return
@@ -159,15 +163,15 @@ class GameTree:
 
         self.memory.save_state_to_moves(state, moves, visit_counts)
 
-    def train_neural_network(self):
+    def train_neural_network_local(self):
         if len(self.memory) < 32 or self.memory.games_played < 1:
             return
         states, moves, probs, wins = self.memory.get_batch(32)
         state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
         self.neural_net.train_batch(state, target=(wins, moves), legal_move_mask=legal_move_mask)
 
-    def end_game(self):
-        self.memory.end_game()
+    def end_game(self, white_win: bool):
+        self.memory.end_game(white_win)
 
 
 class ThreadLocalNodePool:
@@ -259,6 +263,10 @@ class Node:
 
     def apply_policy(self, state_tensor: torch.tensor):
         pass
+
+    @property
+    def legal_move_strings(self):
+        return [str(edge) for edge in self.edges]
 
 class Edge:
 
