@@ -140,20 +140,20 @@ class GameTree:
                 gamma_factor *= 1
 
     def search_for_sufficiently_visited_nodes(self, root_node):
-        def recursive_search(node):
+        def recursive_search(node, count):
 
             self.save_results_to_memory(node)
 
-            if node.branch_complete:
+            if node.branch_complete or count > 400:
                 return
 
             for edge in node.edges:
                 if edge.N >= 250:
-                    recursive_search(edge.child_node)
+                    recursive_search(edge.child_node, count + 1)
 
             return
 
-        recursive_search(root_node)
+        recursive_search(root_node, 0)
 
     def save_results_to_memory(self, current_node):
 
@@ -164,11 +164,11 @@ class GameTree:
         self.memory.save_state_to_moves(state, moves, visit_counts)
 
     def train_neural_network_local(self):
-        if len(self.memory) < 32 or self.memory.games_played < 1:
+        if len(self.memory) < 32:
             return
         states, moves, probs, wins = self.memory.get_batch(32)
         state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
-        self.neural_net.train_batch(state, target=(wins, moves), legal_move_mask=legal_move_mask)
+        self.neural_net.loss_function(state, target=(wins, moves), legal_move_mask=legal_move_mask)
 
     def end_game(self, white_win: bool):
         self.memory.end_game(white_win)
@@ -215,6 +215,7 @@ class Node:
             self.edges: List[Edge] = [Edge() for _ in range(self.DEFAULT_EDGE_NUM)]
 
             self.has_policy = False
+            self.team = None
 
     def re_init(self, state:str, board, parent_edge=None):
 
@@ -247,6 +248,7 @@ class Node:
             self.edges = self.edges[:self.number_legal_moves]
 
         self.has_policy = False
+        self.team = "white" if self.state.split()[1] == 'w' else "black"
 
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
         #TODO sort puct out with the locks
@@ -260,9 +262,6 @@ class Node:
         probs = N_to_tau / np.sum(N_to_tau)
         chosen_edge = np.random.choice(self.edges, p=probs)
         return chosen_edge.child_node, chosen_edge.move
-
-    def apply_policy(self, state_tensor: torch.tensor):
-        pass
 
     @property
     def legal_move_strings(self):
@@ -315,7 +314,28 @@ class Edge:
         # Calculate the reward
         done = board.is_game_over()
         if done:
-            reward = 1. if board.result() == "1-0" else -1. if board.result() == "0-1" else 0.
+            reward = 1.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         else:
             reward = 0.
 

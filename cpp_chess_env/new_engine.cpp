@@ -132,42 +132,135 @@ public:
         return moves.empty();
     }
 
-    py::array_t<float> fen_to_tensor(const std::string& fen) {
-            set_position(fen);
+    py::array_t<float> fen_to_tensor(const std::string &fen)
+    {
+        // 1. Parse the FEN to detect the side to move.
+        //    A typical FEN has fields like "rnbqkbnr/8/8/8/8/8/8/RNBQKBNR w KQkq - 0 1"
+        //    The side-to-move is right after the first space-separated field.
+        std::stringstream ss(fen);
+        std::string board_part, side_to_move_str;
+        ss >> board_part >> side_to_move_str;
+        bool black_to_move = (side_to_move_str == "b");
 
-            // Create a 3D tensor with shape (12, 8, 8)
-            std::vector<float> tensor(12 * 8 * 8, 0.0f);
+        // 2. Set up your internal board data structure from the entire FEN.
+        //    This presumably fills board[8][8].
+        set_position(fen);
 
-            auto encode_piece = [&](char piece, int row, int col) {
-                int plane_index = -1;
-                bool is_white = isupper(piece);
-                char lower_piece = tolower(piece);
-
-                if (lower_piece == 'k') plane_index = 0;
-                else if (lower_piece == 'q') plane_index = 1;
-                else if (lower_piece == 'b') plane_index = 2;
-                else if (lower_piece == 'n') plane_index = 3;
-                else if (lower_piece == 'r') plane_index = 4;
-                else if (lower_piece == 'p') plane_index = 5;
-
-                if (plane_index != -1) {
-                    if (!is_white) plane_index += 6; // Opponent pieces are in the next 6 planes
-                    tensor[plane_index * 64 + row * 8 + col] = 1.0f;
-                }
-            };
-
-            // Encode the board into the tensor
-            for (int row = 0; row < 8; ++row) {
+        // 3. If Black is to move, we will flip the board in our internal representation
+        //    so that from the tensor’s perspective, Black is "on bottom."
+        //    (Alternatively, you can fill the tensor with reversed indices;
+        //     flipping the board array first is often simpler.)
+        if (black_to_move)
+        {
+            // Flip board in-place 180 degrees
+            // The top-left corner becomes bottom-right, etc.
+            for (int row = 0; row < 4; ++row) {
                 for (int col = 0; col < 8; ++col) {
-                    char piece = board[row][col];
-                    if (piece != '.') {
-                        encode_piece(piece, row, col);
-                    }
+                    std::swap(board[row][col], board[7 - row][7 - col]);
                 }
             }
-
-            return py::array_t<float>({12, 8, 8}, tensor.data());
         }
+
+        // 4. Create a 3D tensor with shape (12, 8, 8).
+        //    We’ll store them in row-major for convenience, then construct the PyArray.
+        std::vector<float> tensor(12 * 8 * 8, 0.0f);
+
+        // This lambda encodes a single piece into the correct “channel”.
+        auto encode_piece = [&](char piece, int row, int col) {
+            if (piece == '.') return;
+
+            bool is_white = std::isupper(piece);
+            char lower_piece = std::tolower(piece);
+
+            // Assign piece_type_index from 0..5 (king->0, queen->1, bishop->2, knight->3, rook->4, pawn->5)
+            int piece_type_index = -1;
+            if      (lower_piece == 'k') piece_type_index = 0;
+            else if (lower_piece == 'q') piece_type_index = 1;
+            else if (lower_piece == 'b') piece_type_index = 2;
+            else if (lower_piece == 'n') piece_type_index = 3;
+            else if (lower_piece == 'r') piece_type_index = 4;
+            else if (lower_piece == 'p') piece_type_index = 5;
+            if (piece_type_index < 0) return; // unknown
+
+            // Now determine which side is “friendly” in channels 0..5 and “enemy” in channels 6..11.
+            //
+            // If black_to_move is true, that means black is “friendly,” so black’s pieces go in channels 0..5.
+            // If black_to_move is false, white is “friendly,” so white’s pieces go in channels 0..5.
+            bool piece_is_friendly = black_to_move ? !is_white : is_white;
+
+            int plane_index = piece_type_index + (piece_is_friendly ? 0 : 6);
+            // plane_index is 0..5 if friendly, 6..11 if enemy.
+
+            // Fill the tensor
+            // Flattened index = plane_index * 64 + (row * 8 + col)
+            // row, col are [0..7].
+            tensor[plane_index * 64 + row * 8 + col] = 1.0f;
+        };
+
+        // 5. Encode the board into the tensor
+        for (int row = 0; row < 8; ++row) {
+            for (int col = 0; col < 8; ++col) {
+                char piece = board[row][col];
+                encode_piece(piece, row, col);
+            }
+        }
+
+        // 6. Return a py::array_t<float> with shape [12, 8, 8].
+        return py::array_t<float>({12, 8, 8}, tensor.data());
+    }
+
+    std::string unflip_move(const std::string& move)
+    {
+        // Typically a move string has length 4 or 5 (e.g., "e2e4", possible promotion "e7e8Q" -> length 5).
+        // We'll assume for simplicity it's in the form "e2e4" or "e7e8Q".
+        // If you have promotions, you'll need to handle the promotion char properly.
+        if (move.size() < 4) {
+            throw std::runtime_error("Move string too short");
+        }
+
+        // Extract from-square and to-square
+        char from_file = move[0]; // e.g. 'a'..'h'
+        char from_rank = move[1]; // e.g. '1'..'8'
+        char to_file   = move[2];
+        char to_rank   = move[3];
+
+        // Convert from algebraic to (row, col)
+        // row = 8 - digit_rank, col = file_char - 'a'
+        auto algebraic_to_rc = [&](char file, char rank){
+            int c = file - 'a';    // 'a' -> 0, 'h' -> 7
+            int r = 8 - (rank - '0'); // '1' -> 7, '8' -> 0
+            return std::make_pair(r, c);
+        };
+
+        auto [from_r, from_c] = algebraic_to_rc(from_file, from_rank);
+        auto [to_r,   to_c]   = algebraic_to_rc(to_file,   to_rank);
+
+        // "Unflip" them: new_row = 7 - old_row, new_col = 7 - old_col
+        from_r = 7 - from_r;
+        from_c = 7 - from_c;
+        to_r   = 7 - to_r;
+        to_c   = 7 - to_c;
+
+        // Convert back to algebraic notation
+        // rank = 8 - row, file = col + 'a'
+        auto rc_to_algebraic = [&](int r, int c){
+            char file = static_cast<char>('a' + c);
+            char rank = static_cast<char>('0' + (8 - r));
+            return std::string{file, rank};
+        };
+
+        std::string new_from = rc_to_algebraic(from_r, from_c);
+        std::string new_to   = rc_to_algebraic(to_r,   to_c);
+
+        // If there's a promotion character, keep it at the end. E.g. "e7e8Q"
+        std::string promotion_part;
+        if (move.size() > 4) {
+            promotion_part = move.substr(4); // e.g. "Q"
+        }
+
+        return new_from + new_to + promotion_part;
+    }
+
 
     py::array_t<float> move_to_target(const std::string& move) {
         // Ensure the move string is valid
@@ -653,5 +746,6 @@ PYBIND11_MODULE(chess_moves, m) {
         .def("move_to_target", &ChessEngine::move_to_target, py::arg("move"))
         .def("move_to_target_indices", &ChessEngine::move_to_target_indices, py::arg("move"))
         .def("moves_to_board_tensor", &ChessEngine::moves_to_board_tensor, py::arg("moves"), py::arg("white_to_play"))
-        .def("indices_to_move", &ChessEngine::indices_to_move, py::arg("channel"), py::arg("from_row"), py::arg("from_col"));
+        .def("indices_to_move", &ChessEngine::indices_to_move, py::arg("channel"), py::arg("from_row"), py::arg("from_col"))
+        .def("unflip_move", &ChessEngine::unflip_move, py::arg("move"));
 }

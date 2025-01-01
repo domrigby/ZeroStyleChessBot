@@ -60,7 +60,7 @@ class Memory:
 
     def get_batch(self, batch_size: int = 32):
 
-        idxs = np.random.choice(len(self.turn_list), batch_size)
+        idxs = np.random.choice(len(self.data), batch_size)
 
         batch_data = [self.data[idx] for idx in idxs]
 
@@ -87,9 +87,9 @@ class Memory:
         self.turn_list = []
         self.games_played += 1
 
-    def load_data(self, path: str, sample_size: int = 10000):
+    def load_data(self, path: str = "neural_nets/data/games.pkl", sample_size: int = 100000):
         # Slow but we only do it once
-        with open("neural_nets/data/games.pkl", "rb") as f:
+        with open(path, "rb") as f:
             moves = pkl.load(f)
 
         moves = np.random.choice(moves, sample_size)
@@ -102,7 +102,7 @@ class Memory:
                 else:
                     probs.append(0.)
 
-            data_point = DataPoint(move['state'], move['legal_moves'], probs)
+            data_point = DataPoint(move['fen'], move['legal_moves'], probs)
 
             if len(self.data) < sample_size:
                 self.data.append(data_point)

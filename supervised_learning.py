@@ -8,15 +8,21 @@ import chess_moves
 import pickle
 import os
 
+from typing import List
+
 from neural_nets.conv_net import ChessNet
 
 class ChessDataset(Dataset):
-    def __init__(self, csv_paths=None, pgn_paths=None, pickle_file=None, sample_size: int= 100000):
+    def __init__(self, csv_paths=None, pgn_paths=None, pickle_file=None, sample_size: int= 100000,
+                 accepted_win_types: List[str] = None, rejected_win_types: List[str] = None):
         """
         Initialize the dataset with data from multiple CSV and PGN files.
         """
         self.games = []  # Each game will have precomputed FEN states and moves
         self.chess_engine = chess_moves.ChessEngine()
+
+        # Only accept certain win types
+        self.accepted_win_types = accepted_win_types
 
         # Load data from multiple CSV files if provided
         if csv_paths:
@@ -72,6 +78,11 @@ class ChessDataset(Dataset):
                 if len(moves) < 5:
                     continue  # Skip games with no moves
                 winner = game.headers.get("Result", "*")
+                game_win_type = game.headers.get("Termination", "*")
+
+                for win_type in self.reject_win_types:
+                    if win_type in game_win_types:
+                        continue
                 if winner == "1-0":
                     winner = "white"
                 elif winner == "0-1":
@@ -144,13 +155,25 @@ class ChessDataset(Dataset):
 
         # Convert FEN state and move to tensors
         board_tensor = self.chess_engine.fen_to_tensor(fen)
-        move_tensor = torch.tensor(self.chess_engine.move_to_target(str(move)))
 
         # Create the illegal move mask
         legal_moves = data['legal_moves']
-        legal_move_mask = torch.zeros(move_tensor.size(), dtype=torch.int)
+        legal_move_mask = torch.zeros((66, 8, 8), dtype=torch.int)
         for legal_move in legal_moves:
+            if player == "black":
+                legal_move = self.chess_engine.unflip_move(str(legal_move))
             legal_move_mask[self.chess_engine.move_to_target_indices(str(legal_move))] = 1
+
+        num_legal_moves = len(legal_move_mask)
+
+        # Give all other moves 2.5%
+        true_move_prob = 0.8
+        other_move_probs = (1 - true_move_prob) / (num_legal_moves - 1)
+        scaling_factor = 1. / other_move_probs
+        move_tensor = legal_move_mask / scaling_factor # Set all 1 values to 0.01
+        if player == "black":
+            move = self.chess_engine.unflip_move(move)
+        move_tensor[self.chess_engine.move_to_target_indices(str(move))] = true_move_prob
 
         return {
             'state': board_tensor,
@@ -174,7 +197,7 @@ if __name__ == '__main__':
     chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, pickle_file='data/game.pkl')
 
     idx = 0
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16, init_lr=0.00005)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16, init_lr=0.0001)
 
     import matplotlib.pyplot as plt
 
@@ -182,12 +205,18 @@ if __name__ == '__main__':
     plt.ion()  # Turn on interactive mode
     fig, ax = plt.subplots(figsize=(10, 6))
     loss_values = []
+    policy_loss_values = []
+    value_loss_values = []
     rolling_avg_values = []
+    rolling_avg_policy = []
+    rolling_avg_value = []
     epochs = []
     rolling_avg_epochs = []  # Track epochs for rolling averages
 
-    # line, = ax.plot([], [], linestyle='-', label="Batch Loss")  # Line for batch loss
-    rolling_avg_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg")
+    rolling_avg_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Total Loss)")
+    rolling_avg_policy_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Policy Loss)")
+    rolling_avg_value_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Value Loss)")
+
     ax.set_title("Training Loss")
     ax.set_xlabel("Batch")
     ax.set_ylabel("Loss")
@@ -198,9 +227,8 @@ if __name__ == '__main__':
     save_path = "best_model.pth"  # Path to save the model
 
     # Training loop
-    rolling_window = 100
+    rolling_window = 1000
     batch_counter = 0
-
 
     for epoch in range(10000):
 
@@ -216,18 +244,25 @@ if __name__ == '__main__':
             value_target = batch['result']
 
             # Calculate loss
-            loss = chess_net.loss_function(state_tensor, (value_target.float(), move_target_tensor.float()),
-                                           legal_move_mask=batch['mask'])
+            loss, value_loss, policy_loss = chess_net.loss_function(state_tensor, (
+            value_target.float(), move_target_tensor.float()),legal_move_mask=batch['mask'])
 
             # Update loss values
             loss_values.append(loss.item())
+            policy_loss_values.append(policy_loss.item())
+            value_loss_values.append(value_loss.item())
             epochs.append(batch_counter)
             batch_counter += 1
 
-            # Compute rolling average if enough data is available
+            # Compute rolling averages if enough data is available
             if len(loss_values) >= rolling_window:
                 rolling_avg = sum(loss_values[-rolling_window:]) / rolling_window
+                rolling_avg_policy_loss = sum(policy_loss_values[-rolling_window:]) / rolling_window
+                rolling_avg_value_loss = sum(value_loss_values[-rolling_window:]) / rolling_window
+
                 rolling_avg_values.append(rolling_avg)
+                rolling_avg_policy.append(rolling_avg_policy_loss)
+                rolling_avg_value.append(rolling_avg_value_loss)
                 rolling_avg_epochs.append(batch_counter - 1)
 
                 # Save the model if this is the best rolling average
@@ -238,14 +273,18 @@ if __name__ == '__main__':
 
             # Update the plot
 
-            # Update the rolling average plot only if values exist
             if rolling_avg_values:
                 rolling_avg_line.set_xdata(rolling_avg_epochs)
                 rolling_avg_line.set_ydata(rolling_avg_values)
+                rolling_avg_policy_line.set_xdata(rolling_avg_epochs)
+                rolling_avg_policy_line.set_ydata(rolling_avg_policy)
+                rolling_avg_value_line.set_xdata(rolling_avg_epochs)
+                rolling_avg_value_line.set_ydata(rolling_avg_value)
 
             if batch_counter % 100 == 0:
                 ax.set_xlim(0, batch_counter)  # Update x-axis limit
-                ax.set_ylim(0, max(rolling_avg_values, default=0) * 1.1)  # Update y-axis limit
+                ax.set_ylim(0, max(rolling_avg_values + rolling_avg_policy + rolling_avg_value,
+                                   default=0) * 1.1)  # Update y-axis limit
 
                 plt.draw()
                 plt.pause(0.01)  # Pause briefly to update the plot

@@ -2,7 +2,7 @@ from neural_nets.generic_net import GenericNet, ConvBlock, check_input
 from torch import nn
 import torch
 
-
+from typing import List
 
 class ChessNet(GenericNet):
 
@@ -24,7 +24,7 @@ class ChessNet(GenericNet):
         self.input_conv = nn.Conv2d(self.input_size[0], self.num_filters, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(self.num_filters)
 
-        conv_block_repeats = []
+        conv_block_repeats: List[ConvBlock] = []
         for _ in range(self.num_repeats):
             conv_block_repeats.append(ConvBlock(self.num_filters))
 
@@ -62,18 +62,16 @@ class ChessNet(GenericNet):
 
         policy = self.policy_head(x)
 
+        size_pre_flat = policy.size()
+
+        policy = policy.view(policy.size(0), -1)
+
+        policy = torch.nn.functional.softmax(policy, dim=1)
+
+        policy = policy.view(size_pre_flat)
+
         if legal_move_mask is not None:
-
-            # Where legal move, take policy, else -inf
-            policy = torch.where(legal_move_mask==1, policy, -torch.inf)
-
-            size_pre_flat = policy.size()
-
-            policy = policy.view(policy.size(0), -1)
-
-            policy = torch.nn.functional.softmax(policy, dim=1)
-
-            policy = policy.view(size_pre_flat)
+            policy = torch.where(legal_move_mask == 1, policy, 0)
 
         return value, policy
 
@@ -95,23 +93,7 @@ class ChessNet(GenericNet):
         total_loss.backward()
         self.optimiser.step()
 
-        return total_loss
-
-    def make_prediction(self, state, legal_move_mask):
-
-        # Not training
-        self.eval()
-
-        with torch.no_grad():
-
-            # Get the policy and value
-            value, policy = self(state)
-
-            # Now need to convert these tensors back to their corresponding move
-
-            return value.item(), best_move
-
-
+        return total_loss, value_loss, policy_loss
 
 
 

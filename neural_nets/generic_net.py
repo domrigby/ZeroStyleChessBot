@@ -46,9 +46,9 @@ class GenericNet(nn.Module):
         # Initialise the network
         self._build_network()
 
-        self.optimiser = Adam(self.parameters(), lr=init_lr, weight_decay=1e-4)
+        self.optimiser = Adam(self.parameters(), lr=init_lr, weight_decay=1e-2)
         # Initialize the scheduler
-        self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=1000, gamma=0.97)
+        self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=1000, gamma=0.98)
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -75,7 +75,7 @@ class GenericNet(nn.Module):
             filename = os.path.join(self.save_dir, self.__class__.__name__) + '.pt'
         self.load_state_dict(torch.load(filename))
 
-    def create_legal_move_mask(self, edges):
+    def create_legal_move_mask(self, edges, team: str = None):
         # Create a tensor with all zeros, then set the indices corresponding to legal moves to 1
         legal_move_mask = torch.zeros(self.output_size)
         move_to_indices_lookup = []
@@ -83,7 +83,13 @@ class GenericNet(nn.Module):
         for legal_move in edges:
             # Need to add pawn promotion
             if len(str(legal_move)) < 5:
-                indices = chess_engine.move_to_target_indices(str(legal_move))
+
+                if team == "black":
+                    # If the team is black we rotate the board so its always playing the same way round
+                    legal_move_str = chess_engine.unflip_move(str(legal_move))
+                    indices = chess_engine.move_to_target_indices(legal_move_str)
+                else:
+                    indices = chess_engine.move_to_target_indices(str(legal_move))
                 legal_move_mask[indices] = 1
                 move_to_indices_lookup.append([legal_move, indices])
 
@@ -107,34 +113,43 @@ class GenericNet(nn.Module):
     def node_evaluation(self, node):
         self.eval()
         with torch.no_grad():
-            legal_move_mask, index_map = self.create_legal_move_mask(node.edges)
+            legal_move_mask, index_map = self.create_legal_move_mask(node.edges, node.team)
             board_tensor = chess_engine.fen_to_tensor(node.state)
             value, policy = self(torch.tensor(board_tensor, dtype=torch.float32, device='cuda').unsqueeze(0),
                                       legal_move_mask)
 
-        for edge, index in index_map:
-            edge.P = policy[0][index]
+        # Define the alpha parameter for Dirichlet distribution and the weighting factor
+        alpha = 0.3  # You can adjust this value depending on your needs
+        epsilon = 0.25  # Weight for blending original policy and noise
+
+        # Generate Dirichlet noise
+        dirichlet_noise = np.random.dirichlet([alpha] * len(index_map))
+
+        # Update edge.P with blended Dirichlet noise
+        for i, (edge, index) in enumerate(index_map):
+            noise_value = dirichlet_noise[i]
+            edge.P = (1 - epsilon) * policy[0][index] + epsilon * noise_value
 
         return value
 
     def tensorise_batch(self, states, moves, probabilities, wins):
 
         # re-use input only tensorise
-        state_tens, legal_move_mask = self.tensorise_input(states, moves)
+        state_tens, legal_move_mask, _ = self.tensorise_inputs(states, moves)
 
         # init tensors to fill
         moves_tens = torch.zeros((len(moves), *self.output_size), device=self.device)
         value_tens = torch.zeros((len(wins), 1), device=self.device)
 
-        for idx, (state, move_set, win) in enumerate(zip(states, moves, probabilities, wins)):
+        for idx, (state, move_set, prob_set, win) in enumerate(zip(states, moves, probabilities, wins)):
 
-            for move, prob in zip(move_set, probabilities):
+            for move, prob in zip(move_set, prob_set):
                 indices = chess_engine.move_to_target_indices(str(move))
                 moves_tens[idx][indices] = prob
 
             value_tens[idx] = torch.tensor([win], device=self.device)
 
-        return state_tens, moves_tens, value_tens
+        return state_tens, moves_tens, value_tens, legal_move_mask
 
     def tensorise_inputs(self, states, legal_moves):
 
@@ -143,8 +158,10 @@ class GenericNet(nn.Module):
         legal_move_keys = []
 
         for idx, (state, move_set) in enumerate(zip(states, legal_moves)):
-            state_tens[idx] = self.board_to_tensor(state)
-            legal_move_mask[idx], key = self.create_legal_move_mask(move_set)
+            state_tens[idx] = torch.tensor(chess_engine.fen_to_tensor(state), device=self.device)
+            player_turn = "white" if state.split()[1] == 'w' else "black"
+            this_move_mask, key = self.create_legal_move_mask(move_set, player_turn)
+            legal_move_mask[idx] = torch.tensor(this_move_mask, device=self.device)
 
             legal_move_keys.append(key)
 
