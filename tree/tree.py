@@ -46,7 +46,7 @@ class GameTree:
         self.multiprocess = multiprocess
 
         if not self.multiprocess:
-            self.memory = Memory(100000, preload_data="/home/dom/Code/chess_bot/neural_nets/data/games.pkl")
+            self.memory = Memory(100000)
 
         # if self.training:
         #     self.evaluator = Evaluator(queue=self.state_queue, lock=self.lock, neural_network=self.neural_net)
@@ -64,7 +64,7 @@ class GameTree:
         @profile
         def search_down_tree(env, thread_num_expansions: int, current_node, thread_num: int = 0):
 
-            # Sharaing a radndom number generator SEVERELY slows down the process... explainationn pending
+            # Sharaing a random number generator SEVERELY slows down the process... explainationn pending
             thread_rng = default_rng()
 
             # Initialise the threads env
@@ -145,10 +145,11 @@ class GameTree:
             self.save_results_to_memory(node)
 
             if node.branch_complete or count > 400:
+                print('here')
                 return
 
             for edge in node.edges:
-                if edge.N >= 250:
+                if edge.N >= 100:
                     recursive_search(edge.child_node, count + 1)
 
             return
@@ -312,30 +313,15 @@ class Edge:
             self.child_node = Node(board, parent_edge=self)
 
         # Calculate the reward
-        done = board.is_game_over()
+        done, result_code = board.is_game_over()
+
         if done:
-            reward = 1.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            print("End game found!")
+            self.child_node.branch_complete = True
+            if result_code == 1:
+                reward = 1.
+            else:
+                reward = 0.
         else:
             reward = 0.
 

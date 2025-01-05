@@ -78,7 +78,7 @@ class ChessNet(GenericNet):
     def loss_function(self, input: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None):
 
         target_value, target_policy = target
-        target_value, target_policy = target_value.unsqueeze(-1).to(self.device), target_policy.to(self.device)
+        target_value, target_policy = target_value.to(self.device), target_policy.to(self.device)
 
         # Predicted value
         predicted_value, predicted_policy = self(input, legal_move_mask)

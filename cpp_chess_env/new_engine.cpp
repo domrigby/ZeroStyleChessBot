@@ -17,7 +17,7 @@ public:
         parse_fen(fen);
     }
 
-        std::vector<std::string> get_legal_moves() {
+    std::vector<std::string> get_legal_moves() {
         // Generate all pseudo-legal moves
         std::vector<std::string> pseudo_moves;
         generate_moves(pseudo_moves);
@@ -81,27 +81,29 @@ public:
         return false;
     }
 
-    char apply_move_with_capture(const std::string& move) {
-        int fromCol = move[0] - 'a';
-        int fromRow = '8' - move[1];
-        int toCol   = move[2] - 'a';
-        int toRow   = '8' - move[3];
 
-        // Save the captured piece
-        char captured = board[toRow][toCol];
+    char apply_move_with_capture(const std::string& move) {
+        int from_col = move[0] - 'a';
+        int from_row = '8' - move[1];
+        int to_col = move[2] - 'a';
+        int to_row = '8' - move[3];
+
+        char captured = board[to_row][to_col];
+        char promotion_piece = (move.size() == 5)
+            ? (white_to_move ? toupper(move[4]) : tolower(move[4]))
+            : '.';
 
         // Apply the move
-        board[toRow][toCol] = board[fromRow][fromCol];
-        board[fromRow][fromCol] = '.';
+        board[to_row][to_col] = (promotion_piece != '.') ? promotion_piece : board[from_row][from_col];
+        board[from_row][from_col] = '.';
 
-        // Update game state
-        if (!white_to_move) {
-            fullmove_number++;
-        }
+        if (!white_to_move) fullmove_number++;
         white_to_move = !white_to_move;
 
         return captured;
     }
+
+
 
     void undo_move(const std::string& move, char captured) {
         int fromCol = move[0] - 'a';
@@ -126,10 +128,22 @@ public:
         return generate_fen();
     }
 
-    bool is_game_over() {
-        std::vector<std::string> moves;
-        generate_moves(moves);
-        return moves.empty();
+    std::pair<bool, int> is_game_over() {
+        // Get all legal moves for the current side to move
+        std::vector<std::string> moves = get_legal_moves();
+
+        // If there are no legal moves, it’s either stalemate or checkmate
+        if (moves.empty()) {
+            // If the king of the current side to move is in check, it's checkmate
+            if (is_king_in_check(white_to_move)) {
+                return {true, 1}; // checkmate
+            } else {
+                return {true, 0}; // stalemate
+            }
+        }
+
+        // Otherwise, the game is not over
+        return {false, -1};
     }
 
     py::array_t<float> fen_to_tensor(const std::string &fen)
@@ -209,104 +223,94 @@ public:
         return py::array_t<float>({12, 8, 8}, tensor.data());
     }
 
-    std::string unflip_move(const std::string& move)
-    {
-        // Typically a move string has length 4 or 5 (e.g., "e2e4", possible promotion "e7e8Q" -> length 5).
-        // We'll assume for simplicity it's in the form "e2e4" or "e7e8Q".
-        // If you have promotions, you'll need to handle the promotion char properly.
+
+    std::string unflip_move(const std::string& move) {
+        if (move == "O-O" || move == "O-O-O") {
+            return move; // Castling moves do not change when flipped
+        }
+
         if (move.size() < 4) {
             throw std::runtime_error("Move string too short");
         }
 
-        // Extract from-square and to-square
-        char from_file = move[0]; // e.g. 'a'..'h'
-        char from_rank = move[1]; // e.g. '1'..'8'
-        char to_file   = move[2];
-        char to_rank   = move[3];
+        char from_file = move[0];
+        char from_rank = move[1];
+        char to_file = move[2];
+        char to_rank = move[3];
 
-        // Convert from algebraic to (row, col)
-        // row = 8 - digit_rank, col = file_char - 'a'
-        auto algebraic_to_rc = [&](char file, char rank){
-            int c = file - 'a';    // 'a' -> 0, 'h' -> 7
-            int r = 8 - (rank - '0'); // '1' -> 7, '8' -> 0
+        auto algebraic_to_rc = [&](char file, char rank) {
+            int c = file - 'a';
+            int r = 8 - (rank - '0');
             return std::make_pair(r, c);
         };
 
         auto [from_r, from_c] = algebraic_to_rc(from_file, from_rank);
-        auto [to_r,   to_c]   = algebraic_to_rc(to_file,   to_rank);
+        auto [to_r, to_c] = algebraic_to_rc(to_file, to_rank);
 
-        // "Unflip" them: new_row = 7 - old_row, new_col = 7 - old_col
         from_r = 7 - from_r;
         from_c = 7 - from_c;
-        to_r   = 7 - to_r;
-        to_c   = 7 - to_c;
+        to_r = 7 - to_r;
+        to_c = 7 - to_c;
 
-        // Convert back to algebraic notation
-        // rank = 8 - row, file = col + 'a'
-        auto rc_to_algebraic = [&](int r, int c){
-            char file = static_cast<char>('a' + c);
-            char rank = static_cast<char>('0' + (8 - r));
+        auto rc_to_algebraic = [&](int r, int c) {
+            char file = 'a' + c;
+            char rank = '0' + (8 - r);
             return std::string{file, rank};
         };
 
         std::string new_from = rc_to_algebraic(from_r, from_c);
-        std::string new_to   = rc_to_algebraic(to_r,   to_c);
-
-        // If there's a promotion character, keep it at the end. E.g. "e7e8Q"
-        std::string promotion_part;
-        if (move.size() > 4) {
-            promotion_part = move.substr(4); // e.g. "Q"
-        }
+        std::string new_to = rc_to_algebraic(to_r, to_c);
+        std::string promotion_part = (move.size() == 5) ? move.substr(4) : "";
 
         return new_from + new_to + promotion_part;
     }
 
 
     py::array_t<float> move_to_target(const std::string& move) {
-        // Ensure the move string is valid
-        if ((move.size() != 4 && move != "O-O" && move != "O-O-O") ||
+        if (move.size() < 4 || move.size() > 5 ||
             (move != "O-O" && move != "O-O-O" &&
              (move[0] < 'a' || move[0] > 'h' || move[2] < 'a' || move[2] > 'h' ||
               move[1] < '1' || move[1] > '8' || move[3] < '1' || move[3] > '8'))) {
             throw std::invalid_argument("Invalid move format");
         }
 
-        // Create a 3D tensor with shape (66, 8, 8), initialized to zero
-        std::vector<float> target(66 * 8 * 8, 0.0f);
-
+        std::vector<float> target(70 * 8 * 8, 0.0f); // Extra 4 channels for promotions
         int channel = -1;
-        int from_row = 0, from_col = 0; // Default initialization
+        int from_row = 0, from_col = 0;
 
         if (move == "O-O") {
-            // Kingside castling
-            channel = 64; // Assign channel 64 for kingside castling
+            channel = 64; // Kingside castling
         } else if (move == "O-O-O") {
-            // Queenside castling
-            channel = 65; // Assign channel 65 for queenside castling
+            channel = 65; // Queenside castling
         } else {
-            // Extract move details
-            from_col = move[0] - 'a';
             from_row = '8' - move[1];
-            int to_col = move[2] - 'a';
-            int to_row = '8' - move[3];
+            from_col = move[0] - 'a';
 
-            // Determine the channel using helper
-            channel = calculate_channel(from_row, from_col, to_row, to_col);
+            if (move.size() == 5) {
+                switch (move[4]) {
+                    case 'q': channel = 66; break; // Promotion to Queen
+                    case 'r': channel = 67; break; // Promotion to Rook
+                    case 'b': channel = 68; break; // Promotion to Bishop
+                    case 'n': channel = 69; break; // Promotion to Knight
+                    default: throw std::invalid_argument("Invalid promotion piece");
+                }
+            } else {
+                int to_row = '8' - move[3];
+                int to_col = move[2] - 'a';
+                channel = calculate_channel(from_row, from_col, to_row, to_col);
+            }
         }
 
         if (channel == -1) {
             throw std::invalid_argument("Invalid move");
         }
 
-        // One-hot encode the move in the tensor
         target[channel * 64 + from_row * 8 + from_col] = 1.0f;
-
-        return py::array_t<float>({66, 8, 8}, target.data());
+        return py::array_t<float>({70, 8, 8}, target.data());
     }
 
-    std::tuple<int, int, int> move_to_target_indices(const std::string& move) {
-        // Ensure the move string is valid
-        if ((move.size() != 4 && move != "O-O" && move != "O-O-O") ||
+     std::tuple<int, int, int> move_to_target_indices(const std::string& move) {
+        if ((move.size() != 4 && move.size() != 5 && move != "O-O" && move != "O-O-O") ||
             (move != "O-O" && move != "O-O-O" &&
              (move[0] < 'a' || move[0] > 'h' || move[2] < 'a' || move[2] > 'h' ||
               move[1] < '1' || move[1] > '8' || move[3] < '1' || move[3] > '8'))) {
@@ -314,30 +318,35 @@ public:
         }
 
         int channel = -1;
-        int from_row = 0, from_col = 0; // Default initialization
+        int from_row = 0, from_col = 0;
 
         if (move == "O-O") {
-            // Kingside castling
-            channel = 64; // Assign channel 64 for kingside castling
+            channel = 64; // Kingside castling
         } else if (move == "O-O-O") {
-            // Queenside castling
-            channel = 65; // Assign channel 65 for queenside castling
+            channel = 65; // Queenside castling
         } else {
-            // Extract move details
             from_col = move[0] - 'a';
             from_row = '8' - move[1];
-            int to_col = move[2] - 'a';
-            int to_row = '8' - move[3];
 
-            // Determine the channel using helper
-            channel = calculate_channel(from_row, from_col, to_row, to_col);
+            if (move.size() == 5) {
+                switch (move[4]) {
+                    case 'q': channel = 66; break;
+                    case 'r': channel = 67; break;
+                    case 'b': channel = 68; break;
+                    case 'n': channel = 69; break;
+                    default: throw std::invalid_argument("Invalid promotion piece");
+                }
+            } else {
+                int to_col = move[2] - 'a';
+                int to_row = '8' - move[3];
+                channel = calculate_channel(from_row, from_col, to_row, to_col);
+            }
         }
 
         if (channel == -1) {
             throw std::invalid_argument("Invalid move");
         }
 
-        // Return the channel, row, and column indices
         return std::make_tuple(channel, from_row, from_col);
     }
 
@@ -381,79 +390,54 @@ public:
         return channel;
     }
 
-std::string indices_to_move(int channel, int from_row, int from_col) {
-    if (channel == 64) {
-        return "O-O";   // Kingside castling
-    } else if (channel == 65) {
-        return "O-O-O"; // Queenside castling
-    }
-
-    int to_row = from_row;
-    int to_col = from_col;
-
-    if (channel >= 0 && channel < 56) {
-        // Queen-like moves
-        int direction = channel % 8;
-        int distance = (channel / 8) + 1;
-
-        switch (direction) {
-            case 0: // "Up" (increase row index)
-                to_row = from_row + distance;
-                break;
-            case 1: // "Down" (decrease row index)
-                to_row = from_row - distance;
-                break;
-            case 2: // "Right"
-                to_col = from_col + distance;
-                break;
-            case 3: // "Left"
-                to_col = from_col - distance;
-                break;
-            case 4: // "Up-Right"
-                to_row = from_row + distance;
-                to_col = from_col + distance;
-                break;
-            case 5: // "Up-Left"
-                to_row = from_row + distance;
-                to_col = from_col - distance;
-                break;
-            case 6: // "Down-Right"
-                to_row = from_row - distance;
-                to_col = from_col + distance;
-                break;
-            case 7: // "Down-Left"
-                to_row = from_row - distance;
-                to_col = from_col - distance;
-                break;
-            default:
-                throw std::invalid_argument("Invalid direction for queen-like move");
+    std::string indices_to_move(int channel, int from_row, int from_col) {
+        if (channel == 64) {
+            return "O-O";   // Kingside castling
+        } else if (channel == 65) {
+            return "O-O-O"; // Queenside castling
+        } else if (channel >= 66 && channel <= 69) {
+            char promotion_piece = "qrbn"[channel - 66];
+            char from_file = 'a' + from_col;
+            char from_rank = '8' - from_row;
+            char to_file = from_file;
+            char to_rank = (white_to_move ? '1' : '8'); // Promotion rank depends on side to move
+            return std::string({from_file, from_rank, to_file, to_rank, promotion_piece});
         }
-    } else if (channel >= 56 && channel < 64) {
-        // Knight moves
-        static const int knight_offsets[8][2] = {
-            { 2,  1}, { 2, -1}, {-2,  1}, {-2, -1},
-            { 1,  2}, { 1, -2}, {-1,  2}, {-1, -2}
-        };
-        int knight_index = channel - 56;
-        to_row = from_row + knight_offsets[knight_index][0];
-        to_col = from_col + knight_offsets[knight_index][1];
-    } else {
-        throw std::invalid_argument("Invalid channel");
+
+        int to_row = from_row;
+        int to_col = from_col;
+
+        if (channel >= 0 && channel < 56) {
+            int direction = channel % 8;
+            int distance = (channel / 8) + 1;
+            switch (direction) {
+                case 0: to_row += distance; break;
+                case 1: to_row -= distance; break;
+                case 2: to_col += distance; break;
+                case 3: to_col -= distance; break;
+                case 4: to_row += distance; to_col += distance; break;
+                case 5: to_row += distance; to_col -= distance; break;
+                case 6: to_row -= distance; to_col += distance; break;
+                case 7: to_row -= distance; to_col -= distance; break;
+            }
+        } else if (channel >= 56 && channel < 64) {
+            static const int knight_offsets[8][2] = {
+                {2, 1}, {2, -1}, {-2, 1}, {-2, -1}, {1, 2}, {1, -2}, {-1, 2}, {-1, -2}
+            };
+            int knight_index = channel - 56;
+            to_row += knight_offsets[knight_index][0];
+            to_col += knight_offsets[knight_index][1];
+        } else {
+            throw std::invalid_argument("Invalid channel");
+        }
+
+        char from_file = 'a' + from_col;
+        char from_rank = '8' - from_row;
+        char to_file = 'a' + to_col;
+        char to_rank = '8' - to_row;
+        return std::string({from_file, from_rank, to_file, to_rank});
     }
 
-    // Validate the resulting indices are within bounds
-    if (to_row < 0 || to_row > 7 || to_col < 0 || to_col > 7) {
-        throw std::invalid_argument("Calculated move is out of bounds");
-    }
-
-    // Convert the from and to indices into algebraic notation
-    char from_col_char = 'a' + from_col;
-    char from_row_char = '8' - from_row;
-    char to_col_char   = 'a' + to_col;
-    char to_row_char   = '8' - to_row;
-
-    return std::string({from_col_char, from_row_char, to_col_char, to_row_char});
-}
 
 
     py::array_t<float> moves_to_board_tensor(const std::vector<std::string>& moves, bool white_to_play) {
@@ -530,6 +514,25 @@ private:
         white_to_move = (turn == "w");
     }
 
+    void handle_castling(const std::string& move) {
+        if (move == "O-O") {
+            int row = white_to_move ? 7 : 0;
+            board[row][6] = board[row][4]; // Move king
+            board[row][5] = board[row][7]; // Move rook
+            board[row][4] = '.';
+            board[row][7] = '.';
+        } else if (move == "O-O-O") {
+            int row = white_to_move ? 7 : 0;
+            board[row][2] = board[row][4]; // Move king
+            board[row][3] = board[row][0]; // Move rook
+            board[row][4] = '.';
+            board[row][0] = '.';
+        }
+
+        if (!white_to_move) fullmove_number++;
+        white_to_move = !white_to_move;
+    }
+
 
     void generate_moves(std::vector<std::string>& moves) {
         for (int row = 0; row < 8; ++row) {
@@ -551,51 +554,44 @@ private:
         }
     }
 
-void generate_pawn_moves(int row, int col, std::vector<std::string>& moves) {
+    void generate_pawn_moves(int row, int col, std::vector<std::string>& moves) {
         int direction = white_to_move ? -1 : 1; // White moves up (-1), Black moves down (+1)
         int start_row = white_to_move ? 6 : 1;  // Starting row for white (6) and black (1)
+        int promotion_row = white_to_move ? 0 : 7; // Row where promotion occurs
 
         // Single forward move
         int next_row = row + direction;
-
-//        std::cout << "Attempting single forward move for pawn at (" << row << "," << col << ")\n";
-//        std::cout << "Calculated next_row: " << next_row << ", col: " << col << "\n";
-//
-//        std::cout << "Calling is_within_bounds for (" << next_row << "," << col << "): ";
-//        bool within_bounds_single = is_within_bounds(next_row, col);
-//        std::cout << (within_bounds_single ? "true" : "false") << "\n";
-//
-//        std::cout << "Calling is_empty for (" << next_row << "," << col << "): ";
-//        bool empty_single = is_empty(next_row, col);
-//        std::cout << (empty_single ? "true" : "false") << "\n";
-
-
         if (is_within_bounds(next_row, col) && is_empty(next_row, col)) {
-            add_move(row, col, next_row, col, moves);
+            if (next_row == promotion_row) {
+                // Generate promotion moves
+                for (char promo : { 'q', 'r', 'b', 'n' }) {
+                    add_move(row, col, next_row, col, moves, promo);
+                }
+            } else {
+                add_move(row, col, next_row, col, moves);
 
-            // Double forward move (only if single forward is valid and on start row)
-            int double_row = next_row + direction;
-            if (row == start_row && is_within_bounds(double_row, col) && is_empty(double_row, col)) {
-                add_move(row, col, double_row, col, moves);
+                // Double forward move (only if single forward is valid and on start row)
+                int double_row = next_row + direction;
+                if (row == start_row && is_within_bounds(double_row, col) && is_empty(double_row, col)) {
+                    add_move(row, col, double_row, col, moves);
+                }
             }
         }
 
         // Diagonal captures
-        int left_diag = col - 1;
-        int right_diag = col + 1;
-
-        // Capture to the left diagonal
-        if (is_within_bounds(next_row, left_diag) && is_enemy(next_row, left_diag)) {
-            add_move(row, col, next_row, left_diag, moves);
-        }
-
-        // Capture to the right diagonal
-        if (is_within_bounds(next_row, right_diag) && is_enemy(next_row, right_diag)) {
-            add_move(row, col, next_row, right_diag, moves);
+        for (int offset : { -1, 1 }) {
+            int diag_col = col + offset;
+            if (is_within_bounds(next_row, diag_col) && is_enemy(next_row, diag_col)) {
+                if (next_row == promotion_row) {
+                    for (char promo : { 'q', 'r', 'b', 'n' }) {
+                        add_move(row, col, next_row, diag_col, moves, promo);
+                    }
+                } else {
+                    add_move(row, col, next_row, diag_col, moves);
+                }
+            }
         }
     }
-
-
 
     void generate_knight_moves(int row, int col, std::vector<std::string>& moves) {
         static const int offsets[8][2] = {
@@ -655,17 +651,30 @@ void generate_pawn_moves(int row, int col, std::vector<std::string>& moves) {
     }
 
     void apply_move(const std::string& move) {
+
+        if (move == "O-O" || move == "O-O-O") {
+            handle_castling(move);
+            return;
+        }
+
         int from_col = move[0] - 'a';
         int from_row = '8' - move[1];
         int to_col = move[2] - 'a';
         int to_row = '8' - move[3];
 
-        board[to_row][to_col] = board[from_row][from_col];
+        char promotion_piece = '.';
+        if (move.size() == 5) {
+            promotion_piece = white_to_move ? toupper(move[4]) : tolower(move[4]);
+        }
+
+        // Apply the move
+        board[to_row][to_col] = (promotion_piece != '.') ? promotion_piece : board[from_row][from_col];
         board[from_row][from_col] = '.';
 
         if (!white_to_move) fullmove_number++;
         white_to_move = !white_to_move;
     }
+
 
     std::string generate_fen() const {
         std::ostringstream fen;
@@ -711,12 +720,16 @@ void generate_pawn_moves(int row, int col, std::vector<std::string>& moves) {
     }
 
 
-    void add_move(int from_row, int from_col, int to_row, int to_col, std::vector<std::string>& moves) {
+    void add_move(int from_row, int from_col, int to_row, int to_col, std::vector<std::string>& moves, char promotion = '\0') {
         char from_file = 'a' + from_col; // Column to file
         char from_rank = '8' - from_row; // Row to rank
         char to_file = 'a' + to_col;
         char to_rank = '8' - to_row;
-        moves.emplace_back(std::string() + from_file + from_rank + to_file + to_rank);
+        std::string move = std::string() + from_file + from_rank + to_file + to_rank;
+        if (promotion) {
+            move += promotion;
+        }
+        moves.push_back(move);
     }
 
 

@@ -8,9 +8,8 @@ from neural_nets.conv_net import ChessNet
 
 if __name__ == '__main__':
 
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16)
-    # chess_net.load_network(r"/home/dom/Code/chess_bot/neural_nets/session/best_model_120.pt")
-    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_291.pt")
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=16)
+    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_127.pt")
     chess_net.eval()
 
     tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net)
@@ -48,7 +47,9 @@ if __name__ == '__main__':
         print('\n')
         print(main_board)
 
-        print([f"{edge.move} {edge.N} {edge.Q.item():.2f} \n" for edge in tree.root.edges])
+        print([f"{edge.move} {edge.N} {edge.Q.item():.4f}, {edge.P.item():.3f} \n" for edge in tree.root.edges])
+
+        print(sum([edge.P for edge in tree.root.edges]))
 
         with open(f"save_game/move_{ctr}.svg", "w") as file:
             file.write(svg)

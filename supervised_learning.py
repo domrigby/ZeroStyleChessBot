@@ -7,6 +7,7 @@ import chess.pgn
 import chess_moves
 import pickle
 import os
+import glob
 
 from typing import List
 
@@ -23,6 +24,7 @@ class ChessDataset(Dataset):
 
         # Only accept certain win types
         self.accepted_win_types = accepted_win_types
+        self.rejected_win_types = rejected_win_types
 
         # Load data from multiple CSV files if provided
         if csv_paths:
@@ -49,24 +51,53 @@ class ChessDataset(Dataset):
                 loaded_games = np.random.choice(loaded_games, sample_size)
             self.games = loaded_games
 
+    def load_random_file(self, dir: str = "/home/dom/Code/chess_bot/neural_nets/data/pickles/shuffled_chunks", sample_size: int = 100000):
+
+        # Get all pickle files in the directory
+        files = glob.glob(dir + "/*.pkl")
+        self.games = []
+
+        num_games = 5
+        ind_sample_size = sample_size// 5
+
+        # Load games from pickle
+        for _ in range(num_games):
+            with open(np.random.choice(files), "rb") as f:
+                new_games = pickle.load(f)
+                new_games = np.random.choice(new_games, min(len(new_games), ind_sample_size))
+                self.games.extend(new_games)
+
 
     def load_csv(self, csv_path):
         """
         Load game data from a CSV file.
         """
+        self.games = []
         csv_data = pd.read_csv(csv_path)
         print(f"Loading {csv_path}")
+        counter = 0
         for _, row in csv_data.iterrows():
             moves = row['moves'].split()
             if len(moves) < 5:
                 continue  # Skip games with no moves
             winner = row['winner']
-            self.add_game_to_dataset(moves, winner)
+            self.save_game_to_pkl(moves, winner)
+            counter += 1
+
+        file_name_with_ext = os.path.basename(csv_path)
+        file_name, _ = os.path.splitext(file_name_with_ext)
+        path = os.path.join("/home/dom/Code/chess_bot/neural_nets/data/pickles", file_name + '.pkl')
+
+        # Save a pickle of the file
+        with open(path, "wb") as f:
+            pickle.dump(self.games, f)
 
     def load_pgn(self, pgn_path):
         """
         Load game data from a PGN file.
         """
+        self.games = []
+
         with open(pgn_path, 'r') as pgn_file:
             print(f"Loading {pgn_path}")
             while True:
@@ -75,23 +106,32 @@ class ChessDataset(Dataset):
                     break
                 # Extract moves and winner
                 moves = [move.uci() for move in game.mainline_moves()]
-                if len(moves) < 5:
-                    continue  # Skip games with no moves
+
                 winner = game.headers.get("Result", "*")
                 game_win_type = game.headers.get("Termination", "*")
 
-                for win_type in self.reject_win_types:
-                    if win_type in game_win_types:
+                for win_type in self.rejected_win_types:
+                    if win_type in game_win_type:
                         continue
+
                 if winner == "1-0":
                     winner = "white"
                 elif winner == "0-1":
                     winner = "black"
                 else:
                     winner = "draw"
-                self.add_game_to_dataset(moves, winner)
 
-    def add_game_to_dataset(self, moves, winner):
+                self.save_game_to_pkl(moves, winner)
+
+        file_name_with_ext = os.path.basename(pgn_path)
+        file_name, _ = os.path.splitext(file_name_with_ext)
+        path = os.path.join("/home/dom/Code/chess_bot/neural_nets/data/pickles", file_name + '.pkl')
+
+        # Save a pickle of the file
+        with open(path, "wb") as f:
+            pickle.dump(self.games, f)
+
+    def save_game_to_pkl(self, moves, winner):
         """
         Precompute FEN states and moves for a single game and add to the dataset.
         """
@@ -102,7 +142,9 @@ class ChessDataset(Dataset):
             return
 
         for idx, move in enumerate(moves):
+
             fen = board.fen()
+
             try:
 
                 move = board.parse_san(move)
@@ -113,10 +155,6 @@ class ChessDataset(Dataset):
 
                 # Update the board for the next move
                 board.push(move)
-
-                if len(str(move)) > 4:
-                    #TODO: integrate piece upgrades
-                    continue
 
                 if len(legal_moves) == 0:
                     print(f"Game state {fen} with no legal moves.")
@@ -158,7 +196,7 @@ class ChessDataset(Dataset):
 
         # Create the illegal move mask
         legal_moves = data['legal_moves']
-        legal_move_mask = torch.zeros((66, 8, 8), dtype=torch.int)
+        legal_move_mask = torch.zeros((70, 8, 8), dtype=torch.int)
         for legal_move in legal_moves:
             if player == "black":
                 legal_move = self.chess_engine.unflip_move(str(legal_move))
@@ -187,52 +225,84 @@ if __name__ == '__main__':
     # Example Usage
     # Provide lists of paths to your CSV and PGN files
     csv_paths = [] #[r"/home/dom/Code/chess_bot/neural_nets/data/games.csv"]  # Replace with your CSV file paths
-    pgn_paths =  [] # ["/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-black.pgn" ,
-                 # "/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-white.pgn",
-                 # "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-black.pgn",
-                 # "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-white.pgn"]  # Replace with your PGN file paths
+    pgn_paths =  [] #["/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-black.pgn" ,
+    #              "/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-white.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-black.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-white.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/robertpechacek-white.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/Vepkhvebi-white.pgn"]  # Replace with your PGN file paths
+    # pgn_paths = ["/home/dom/Code/chess_bot/neural_nets/data/GothamChess-black.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/GothamChess-white.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/daniel1966_1-black.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/wuy21-black.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/wuy21-white.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/JonasEilenberg-black.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/JonasEilenberg-white.pgn",
+    #              "/home/dom/Code/chess_bot/neural_nets/data/vanyakuba-black.pgn"]
 
     # Initialize dataset with multiple CSV and PGN files
     batch_size = 32
-    chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, pickle_file='data/game.pkl')
+    chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, rejected_win_types=['time']) #pickle_file='data/game.pkl')
 
     idx = 0
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16, init_lr=0.0001)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=16, init_lr=0.0001
+                         )
 
     import matplotlib.pyplot as plt
 
-    # Initialize the live plot
+    import matplotlib.pyplot as plt
+    import os
+    import torch
+
+    # Initialize live plots with three subplots for Total, Value, and Policy losses
     plt.ion()  # Turn on interactive mode
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15), sharex=True)
+
+    # Total Loss
     loss_values = []
-    policy_loss_values = []
-    value_loss_values = []
     rolling_avg_values = []
-    rolling_avg_policy = []
+    rolling_avg_epochs = []
+
+    # Value Loss
+    value_loss_values = []
     rolling_avg_value = []
-    epochs = []
-    rolling_avg_epochs = []  # Track epochs for rolling averages
 
-    rolling_avg_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Total Loss)")
-    rolling_avg_policy_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Policy Loss)")
-    rolling_avg_value_line, = ax.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Value Loss)")
+    # Policy Loss
+    policy_loss_values = []
+    rolling_avg_policy = []
 
-    ax.set_title("Training Loss")
-    ax.set_xlabel("Batch")
-    ax.set_ylabel("Loss")
-    ax.grid(True)
-    ax.legend()
+    # Lines for rolling averages
+    rolling_avg_total_line, = ax1.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Total Loss)")
+    rolling_avg_value_line, = ax2.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Value Loss)")
+    rolling_avg_policy_line, = ax3.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Policy Loss)")
 
+    # Plot configurations for Total Loss
+    ax1.set_title("Total Loss")
+    ax1.set_ylabel("Loss")
+    ax1.grid(True)
+    ax1.legend()
+
+    # Plot configurations for Value Loss
+    ax2.set_title("Value Loss")
+    ax2.set_ylabel("Loss")
+    ax2.grid(True)
+    ax2.legend()
+
+    # Plot configurations for Policy Loss
+    ax3.set_title("Policy Loss")
+    ax3.set_xlabel("Batch")
+    ax3.set_ylabel("Loss")
+    ax3.grid(True)
+    ax3.legend()
+
+    # Training parameters
     best_rolling_avg = float('inf')  # Initialize best rolling average
-    save_path = "best_model.pth"  # Path to save the model
-
-    # Training loop
     rolling_window = 1000
     batch_counter = 0
 
+    # Training loop
     for epoch in range(10000):
-
-        chess_dataset.load_pickled_file(sample_size=100000)
+        chess_dataset.load_random_file()
         dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
 
         print(f"Data points: {len(chess_dataset.games)} Batches: {len(chess_dataset.games) // batch_size}")
@@ -244,14 +314,16 @@ if __name__ == '__main__':
             value_target = batch['result']
 
             # Calculate loss
-            loss, value_loss, policy_loss = chess_net.loss_function(state_tensor, (
-            value_target.float(), move_target_tensor.float()),legal_move_mask=batch['mask'])
+            loss, value_loss, policy_loss = chess_net.loss_function(
+                state_tensor,
+                (value_target.float(), move_target_tensor.float()),
+                legal_move_mask=batch['mask']
+            )
 
             # Update loss values
             loss_values.append(loss.item())
-            policy_loss_values.append(policy_loss.item())
             value_loss_values.append(value_loss.item())
-            epochs.append(batch_counter)
+            policy_loss_values.append(policy_loss.item())
             batch_counter += 1
 
             # Compute rolling averages if enough data is available
@@ -271,20 +343,25 @@ if __name__ == '__main__':
                     torch.save(chess_net.state_dict(), f"networks/best_model_{epoch}.pt")
                     print(f"New best model saved with rolling avg loss: {best_rolling_avg:.4f}")
 
-            # Update the plot
-
-            if rolling_avg_values:
-                rolling_avg_line.set_xdata(rolling_avg_epochs)
-                rolling_avg_line.set_ydata(rolling_avg_values)
-                rolling_avg_policy_line.set_xdata(rolling_avg_epochs)
-                rolling_avg_policy_line.set_ydata(rolling_avg_policy)
+            # Update the plots
+            if rolling_avg_epochs:
+                rolling_avg_total_line.set_xdata(rolling_avg_epochs)
+                rolling_avg_total_line.set_ydata(rolling_avg_values)
                 rolling_avg_value_line.set_xdata(rolling_avg_epochs)
                 rolling_avg_value_line.set_ydata(rolling_avg_value)
+                rolling_avg_policy_line.set_xdata(rolling_avg_epochs)
+                rolling_avg_policy_line.set_ydata(rolling_avg_policy)
 
             if batch_counter % 100 == 0:
-                ax.set_xlim(0, batch_counter)  # Update x-axis limit
-                ax.set_ylim(0, max(rolling_avg_values + rolling_avg_policy + rolling_avg_value,
-                                   default=0) * 1.1)  # Update y-axis limit
+                # Update x-axis limits
+                ax1.set_xlim(0, batch_counter)
+                ax2.set_xlim(0, batch_counter)
+                ax3.set_xlim(0, batch_counter)
+
+                # Update y-axis limits for each subplot
+                ax1.set_ylim(0, max(rolling_avg_values, default=0) * 1.1)
+                ax2.set_ylim(0, max(rolling_avg_value, default=0) * 1.1)
+                ax3.set_ylim(0, max(rolling_avg_policy, default=0) * 1.1)
 
                 plt.draw()
                 plt.pause(0.01)  # Pause briefly to update the plot
@@ -298,3 +375,4 @@ if __name__ == '__main__':
 
     print(f"Training complete. Best rolling average: {best_rolling_avg:.4f}")
     print(f"Model saved to {os.path.abspath(save_path)}")
+

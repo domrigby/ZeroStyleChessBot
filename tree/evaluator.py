@@ -11,7 +11,8 @@ from neural_nets.conv_net import ChessNet
 class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallelwith MCTS"""
 
-    def __init__(self, neural_network: ChessNet, process_queue, results_queue, experience_queue, batch_size: int = 32):
+    def __init__(self, neural_network_class: ChessNet, nn_kwargs, process_queue, results_queue, experience_queue,
+                 batch_size: int = 32, nn_load_path: str = None):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -24,7 +25,7 @@ class NeuralNetHandling(Process):
 
         self.batch_size = batch_size
 
-        self.neural_network = neural_network
+        self.neural_network = neural_network_class(**nn_kwargs)
 
         self.memory = Memory(100000)
 

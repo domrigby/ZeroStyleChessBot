@@ -1,4 +1,5 @@
 import torch
+from sympy.abc import epsilon
 from torch import nn
 from torch.optim import Adam
 from torch.optim import lr_scheduler
@@ -111,6 +112,7 @@ class GenericNet(nn.Module):
         return chess_engine.fen_to_tensor(fen)
 
     def node_evaluation(self, node):
+
         self.eval()
         with torch.no_grad():
             legal_move_mask, index_map = self.create_legal_move_mask(node.edges, node.team)
@@ -122,14 +124,31 @@ class GenericNet(nn.Module):
         alpha = 0.3  # You can adjust this value depending on your needs
         epsilon = 0.25  # Weight for blending original policy and noise
 
+
+        # Assosciate probability with its edge
+        for edge, index in index_map:
+            edge.P = policy[0][index]
+
+        Ps = np.array([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges])
+
+        sum_Ps = np.sum(Ps)
+
+        if sum_Ps <= 1e-6:
+            Ps = np.ones_like(Ps) / len(Ps)
+            sum_Ps = np.sum(Ps)
+
         # Generate Dirichlet noise
-        dirichlet_noise = np.random.dirichlet([alpha] * len(index_map))
+        dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
 
-        # Update edge.P with blended Dirichlet noise
-        for i, (edge, index) in enumerate(index_map):
-            noise_value = dirichlet_noise[i]
-            edge.P = (1 - epsilon) * policy[0][index] + epsilon * noise_value
+        Ps = (1-epsilon) * Ps / (sum_Ps + 1e-6) + epsilon * dirichlet_noise
 
+        for idx, edge in enumerate(node.edges):
+            edge.P  = Ps[idx]
+
+        if sum([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges]) < 0.95:
+            print(f"In tree: {sum([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges])}")
+
+        # Return value for backpropagation
         return value
 
     def tensorise_batch(self, states, moves, probabilities, wins):
@@ -147,7 +166,7 @@ class GenericNet(nn.Module):
                 indices = chess_engine.move_to_target_indices(str(move))
                 moves_tens[idx][indices] = prob
 
-            value_tens[idx] = torch.tensor([win], device=self.device)
+            value_tens[idx] = torch.tensor(win, device=self.device)
 
         return state_tens, moves_tens, value_tens, legal_move_mask
 
@@ -169,16 +188,17 @@ class GenericNet(nn.Module):
 
 class ConvBlock(nn.Module):
 
-    def __init__(self, in_channels: int, num_repeats: int = 1):
+    def __init__(self, in_channels: int, num_repeats: int = 2, activation_period: int = 2):
 
         super().__init__()
 
         convs_list = []
 
-        for _ in range(num_repeats):
+        for idx in range(num_repeats):
             convs_list.append(nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1))
-            convs_list.append(nn.LeakyReLU())
             convs_list.append(nn.BatchNorm2d(in_channels))
+            if idx % activation_period == 0:
+                convs_list.append(nn.LeakyReLU())
 
         self.conv_block = nn.Sequential(*convs_list)
         self.out_act = nn.LeakyReLU()
