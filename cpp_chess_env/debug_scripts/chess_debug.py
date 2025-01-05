@@ -48,8 +48,12 @@ def test_chess_engine():
 
     # Test Game Continuation
     print("\n=== Test Game Continuation ===")
-    game_over = engine.is_game_over()
-    print("Is the game over?", game_over)
+    engine = chess_moves.ChessEngine()
+    engine.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    game_over,_ = engine.is_game_over()
+    for row in range(8):
+        print("".join(board[row]))
+    print("Is the game over?", game_over, _)
     assert not game_over, "Game should not be over at the start!"
 
     engine = chess_moves.ChessEngine()

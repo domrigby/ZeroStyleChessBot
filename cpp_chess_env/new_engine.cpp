@@ -8,7 +8,9 @@
 #include <unordered_map>
 #include <algorithm>
 #include <iostream>
+#include <array>
 
+constexpr int MAX_MOVES = 218
 namespace py = pybind11;
 
 class ChessEngine {
@@ -129,22 +131,27 @@ public:
     }
 
     std::pair<bool, int> is_game_over() {
+        // Check for the 50-move rule
+        if (halfmove_clock >= 100) {
+            return {true, 2}; // 2 represents a draw due to the 50-move rule
+        }
+
         // Get all legal moves for the current side to move
         std::vector<std::string> moves = get_legal_moves();
 
         // If there are no legal moves, it’s either stalemate or checkmate
         if (moves.empty()) {
-            // If the king of the current side to move is in check, it's checkmate
             if (is_king_in_check(white_to_move)) {
-                return {true, 1}; // checkmate
+                return {true, 1}; // Checkmate
             } else {
-                return {true, 0}; // stalemate
+                return {true, 0}; // Stalemate
             }
         }
 
         // Otherwise, the game is not over
         return {false, -1};
     }
+
 
     py::array_t<float> fen_to_tensor(const std::string &fen)
     {
@@ -493,26 +500,58 @@ private:
 
     void parse_fen(const std::string& fen) {
         std::istringstream iss(fen);
-        std::string board_fen, turn;
-        iss >> board_fen >> turn;
 
+        // We’ll read at least 6 tokens from the FEN (some may be unused):
+        //   1) board_fen
+        //   2) turn
+        //   3) castling rights (unused here, but we must read it)
+        //   4) en_passant (unused here, but we must read it)
+        //   5) halfmove clock
+        //   6) fullmove number
+        std::string board_fen, turn, castling, en_passant, halfmove_s, fullmove_s;
+        iss >> board_fen >> turn >> castling >> en_passant >> halfmove_s >> fullmove_s;
+
+        // Clear the board
+        for (int r = 0; r < 8; ++r) {
+            for (int c = 0; c < 8; ++c) {
+                board[r][c] = '.';
+            }
+        }
+
+        // Parse the board portion (board_fen)
         int row = 0, col = 0;
         for (char c : board_fen) {
             if (c == '/') {
                 row++;
                 col = 0;
-            } else if (std::isdigit(c)) {
+            } else if (std::isdigit(static_cast<unsigned char>(c))) {
                 int empty_squares = c - '0';
                 for (int i = 0; i < empty_squares; ++i) {
-                    board[row][col++] = '.'; // Use '.' for empty squares
+                    board[row][col++] = '.';
                 }
             } else {
                 board[row][col++] = c;
             }
         }
 
+        // Which side to move
         white_to_move = (turn == "w");
+
+        // Parse halfmove clock
+        if (!halfmove_s.empty()) {
+            halfmove_clock = std::stoi(halfmove_s);
+        } else {
+            halfmove_clock = 0;
+        }
+
+        // Parse fullmove number
+        if (!fullmove_s.empty()) {
+            fullmove_number = std::stoi(fullmove_s);
+        } else {
+            fullmove_number = 1;
+        }
     }
+
 
     void handle_castling(const std::string& move) {
         if (move == "O-O") {
@@ -651,33 +690,54 @@ private:
     }
 
     void apply_move(const std::string& move) {
-
+        // If castling, handle that separately
         if (move == "O-O" || move == "O-O-O") {
             handle_castling(move);
             return;
         }
 
+        // Get from/to squares
         int from_col = move[0] - 'a';
         int from_row = '8' - move[1];
-        int to_col = move[2] - 'a';
-        int to_row = '8' - move[3];
+        int to_col   = move[2] - 'a';
+        int to_row   = '8' - move[3];
 
+        // Check for promotion piece
         char promotion_piece = '.';
         if (move.size() == 5) {
             promotion_piece = white_to_move ? toupper(move[4]) : tolower(move[4]);
         }
 
+        // Check if it's a capture
+        bool is_capture = (board[to_row][to_col] != '.');
+
+        // Check if it's a pawn move
+        char moving_piece = board[from_row][from_col];
+        bool is_pawn_move = (std::tolower(moving_piece) == 'p');
+
         // Apply the move
-        board[to_row][to_col] = (promotion_piece != '.') ? promotion_piece : board[from_row][from_col];
+        board[to_row][to_col] = (promotion_piece != '.') ? promotion_piece : moving_piece;
         board[from_row][from_col] = '.';
 
-        if (!white_to_move) fullmove_number++;
+        // Update halfmove clock
+        if (is_capture || is_pawn_move) {
+            halfmove_clock = 0;
+        } else {
+            halfmove_clock++;
+        }
+
+        // Update fullmove number and side to move
+        if (!white_to_move) {
+            fullmove_number++;
+        }
         white_to_move = !white_to_move;
     }
 
 
     std::string generate_fen() const {
         std::ostringstream fen;
+
+        // 1) Board layout
         for (int row = 0; row < 8; ++row) {
             int empty_count = 0;
             for (int col = 0; col < 8; ++col) {
@@ -694,9 +754,25 @@ private:
             if (empty_count > 0) fen << empty_count;
             if (row < 7) fen << '/';
         }
-        fen << ' ' << (white_to_move ? 'w' : 'b') << " - - 0 " << fullmove_number;
+
+        // 2) Side to move
+        fen << ' ' << (white_to_move ? 'w' : 'b');
+
+        // 3) Castling rights – ignoring for now, so output '-'
+        fen << " -";
+
+        // 4) En passant square – ignoring for now, so output '-'
+        fen << " -";
+
+        // 5) Halfmove clock
+        fen << " " << halfmove_clock;
+
+        // 6) Fullmove number
+        fen << " " << fullmove_number;
+
         return fen.str();
     }
+
 
     bool is_within_bounds(int row, int col) const {
         return row >= 0 && row < 8 && col >= 0 && col < 8;
