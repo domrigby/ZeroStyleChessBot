@@ -10,7 +10,6 @@
 #include <iostream>
 #include <array>
 
-constexpr int MAX_MOVES = 218
 namespace py = pybind11;
 
 class ChessEngine {
