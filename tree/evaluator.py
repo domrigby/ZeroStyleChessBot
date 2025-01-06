@@ -11,7 +11,7 @@ from neural_nets.conv_net import ChessNet
 class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallelwith MCTS"""
 
-    def __init__(self, neural_network_class: ChessNet, nn_kwargs, process_queue, results_queue, experience_queue,
+    def __init__(self, neural_net: ChessNet, process_queue, results_queue, experience_queue,
                  batch_size: int = 32, nn_load_path: str = None):
         """
         :param queue: queue from the tree search
@@ -20,12 +20,14 @@ class NeuralNetHandling(Process):
         super().__init__()
         self.process_queue = process_queue
         self.results_queue = results_queue
+
         self.experience_queue = experience_queue
+
         self.running = True
 
         self.batch_size = batch_size
 
-        self.neural_network = neural_network_class(**nn_kwargs)
+        self.neural_net = neural_net
 
         self.memory = Memory(100000)
 
@@ -35,32 +37,46 @@ class NeuralNetHandling(Process):
         while self.running:
 
             if not self.process_queue.empty():
+                hashes = []
+                states = []
+                legal_moves = []
 
-                # Process inference
-                nodes_to_evaluate = [self.process_queue.get() for _ in range(min(self.process_queue.qsize(), self.batch_size))]
+                for _ in range(min(self.process_queue.qsize(), self.batch_size)):
+                    the_hash, state, legal_moves_strings = self.process_queue.get()
+                    hashes.append(the_hash)
+                    states.append(state)
+                    legal_moves.append(legal_moves_strings)
 
-                states = [node.state for node in nodes_to_evaluate]
-                legal_moves = [node.legal_move_strings for node in nodes_to_evaluate]
-
-                state_tens, legal_move_mask, legal_move_key = self.neural_network.tensorise_inputs(states, legal_moves)
+                # Create the input tensors
+                state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
 
                 # Perform forward pass
-                values, policies = self.neural_network(state_tens, legal_move_mask)
+                self.neural_net.eval()
+                values, policies = self.neural_net(state_tens, legal_move_mask)
+                self.neural_net.train()
 
                 # Results will come in tuples of (node, value, [[edge, prob]])
-                for idx, node in enumerate(nodes_to_evaluate):
+                for idx, the_hash in enumerate(hashes):
+
                     move_probs = []
-                    for edge, move_idx in legal_move_key:
+                    for edge, move_idx in legal_move_key[idx]:
                         move_probs.append([edge, policies[idx][move_idx].item()])
-                    self.results_queue.put((node, values[idx].item(), move_probs))
+
+                    self.results_queue.put((the_hash, values[idx].item(), move_probs, legal_move_key[idx]))
 
             if not self.experience_queue.empty():
-                pass
+                for _ in range(min(self.experience_queue.qsize(), self.batch_size)):
+                    state, moves, visit_counts, predicted_value, is_root_node =  self.experience_queue.get()
+                    self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, is_root_node)
 
             self.train_neural_network()
                 
     def train_neural_network(self):
-        pass
+        if len(self.memory) < 32:
+            return
+        states, moves, probs, wins = self.memory.get_batch(32)
+        state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
+        self.neural_net.loss_function(state, target=(wins, moves), legal_move_mask=legal_move_mask)
 
     def update_node_and_edges(self, state, evaluation):
         pass

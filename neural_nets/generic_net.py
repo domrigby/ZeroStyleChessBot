@@ -124,7 +124,6 @@ class GenericNet(nn.Module):
         alpha = 0.3  # You can adjust this value depending on your needs
         epsilon = 0.25  # Weight for blending original policy and noise
 
-
         # Assosciate probability with its edge
         for edge, index in index_map:
             edge.P = policy[0][index]
@@ -149,7 +148,7 @@ class GenericNet(nn.Module):
             print(f"In tree: {sum([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges])}")
 
         # Return value for backpropagation
-        return value
+        return value.cpu().item()
 
     def tensorise_batch(self, states, moves, probabilities, wins):
 

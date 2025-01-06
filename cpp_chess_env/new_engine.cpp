@@ -131,7 +131,7 @@ public:
 
     std::pair<bool, int> is_game_over() {
         // Check for the 50-move rule
-        if (halfmove_clock >= 100) {
+        if (halfmove_clock >= 25) {
             return {true, 2}; // 2 represents a draw due to the 50-move rule
         }
 

@@ -11,11 +11,11 @@ class Turn(Enum):
 
 
 class DataPoint:
-    def __init__(self, state: str, moves: List[str], probs: List[float]):
+    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.):
         self.state = state
         self.moves = moves
         self.probs = probs
-        self.win_val = 0
+        self.win_val = win_val
         self.white_turn = True if state.split()[1] == 'w' else False
 
 
@@ -41,7 +41,8 @@ class Memory:
     def __len__(self):
         return len(self.data)
 
-    def save_state_to_moves(self, state: str, observed_moves: List[str], visits: List[int]):
+    def save_state_to_moves(self, state: str, observed_moves: List[str], visits: List[int], value: float = 0.,
+                            is_root_node: bool = False):
 
         #TODO: its prob faster to do tensor conversion here
 
@@ -53,9 +54,11 @@ class Memory:
             moves.append(move)
             probs.append(count/total)
 
-        data_point = DataPoint(state, moves, probs)
+        data_point = DataPoint(state, moves, probs, value)
 
-        self.turn_list.append(data_point)
+        if is_root_node:
+            self.turn_list.append(data_point)
+
         self.data.append(data_point)
 
     def get_batch(self, batch_size: int = 32):

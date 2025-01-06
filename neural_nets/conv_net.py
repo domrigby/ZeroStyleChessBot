@@ -85,7 +85,7 @@ class ChessNet(GenericNet):
 
         # Calculate losses
         value_loss = self.value_loss(predicted_value, target_value)
-        policy_loss = self.policy_loss(predicted_policy, torch.tensor(target_policy))
+        policy_loss = self.policy_loss(predicted_policy, target_policy)
 
         total_loss = value_loss + policy_loss
 
