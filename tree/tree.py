@@ -28,13 +28,14 @@ from tree.memory import Memory
 from neural_nets.conv_net import ChessNet
 
 from tree.evaluator import NeuralNetHandling
+from tree.trainer import TrainingProcess
 
 
 class GameTree:
     def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                  neural_net = None, manager: Manager = None, training: bool =  False,
-                 multiprocess: bool = False):
+                 multiprocess: bool = False, num_evalators: int = 1):
 
         if env_kwargs is None:
             env_kwargs = {}
@@ -63,15 +64,20 @@ class GameTree:
         else:
             self.process_queue = Queue()
             self.process_queue_node_lookup = {}
-            self.awaiting_backpropagation_lookup = {}
 
             self.experience_queue = Queue()
             self.results_queue = Queue()
 
-            self.evaluator = NeuralNetHandling(neural_net=neural_net, process_queue=self.process_queue,
-                                               experience_queue=self.experience_queue,
-                                               results_queue=self.results_queue, batch_size=128)
-            self.evaluator.start()
+            self.evaluators: List[NeuralNetHandling] = []
+
+            for _ in range(num_evalators):
+                self.evaluators.append(NeuralNetHandling(neural_net=neural_net, process_queue=self.process_queue,
+                                               results_queue=self.results_queue, batch_size=128))
+
+            self.trainer = TrainingProcess(neural_net=neural_net, experience_queue=self.experience_queue, batch_size=128)
+
+            [evaluator.start() for evaluator in self.evaluators]
+            self.trainer.start()
 
     def reset(self):
         self.root = Node(self.env(), state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
@@ -116,6 +122,9 @@ class GameTree:
                     if self.multiprocess:
                         self.apply_neural_net_results()
 
+                    if edge is None:
+                        break
+
                     # Currently have an issue with time exploding in the late game
                     time_now = time.time()
                     if time_now - start_time > time_limit:
@@ -135,20 +144,18 @@ class GameTree:
                     else:
 
                         # Save the backpropagation until node results have returned
-                        visited_edges_tuple = tuple(visited_edges)
-                        visited_edges_hash = hash(visited_edges_tuple)
 
-                        if visited_edges_hash not in self.awaiting_backpropagation_lookup:
-                            self.awaiting_backpropagation_lookup[visited_edges_hash] = visited_edges_tuple
+                        # TODO: current_node is massive overkill for communication
+                        node_hash = hash(current_node)
 
-                            # TODO: current_node is massive overkill for communication
-                            node_hash = hash(current_node)
+                        if node_hash not in self.process_queue_node_lookup:
+
                             states = current_node.state
                             legal_moves = current_node.legal_move_strings
 
-                            self.process_queue_node_lookup[node_hash] = current_node
+                            self.process_queue_node_lookup[node_hash] = (current_node, visited_edges)
 
-                            self.process_queue.put((node_hash, states, legal_moves, visited_edges_hash))
+                            self.process_queue.put((node_hash, states, legal_moves))
 
                             # Set virtual loss to discourage search down here for a bit
                             self.virtual_loss = -10.
@@ -239,9 +246,9 @@ class GameTree:
         if not results:
             return  # No results to process
 
-        for the_hash, value, move_probs, index_map, visited_edges_hash in results:
+        for the_hash, value, move_probs, index_map in results:
             # Retrieve the node associated with this hash
-            node = self.process_queue_node_lookup.pop(the_hash)
+            node, visited_edges = self.process_queue_node_lookup.pop(the_hash)
 
             # Update node value
             node.V = value
@@ -272,8 +279,6 @@ class GameTree:
             for edge, prob in zip(node.edges, Ps):
                 edge.P = prob
 
-            # Perform backpropagation
-            visited_edges = self.awaiting_backpropagation_lookup.pop(visited_edges_hash)
             self.backpropagation(visited_edges, value)
 
 
@@ -317,7 +322,7 @@ class Node:
             self.re_init(state, board, parent_edge)
         else:
             # Initialise empty forms of the class
-            self.state: board.fen = None  # The chess fen string object representing this state
+            self.state: str = None  # The chess fen string object representing this state
             self.parent_edge: Edge = None
             self.player = None
 
@@ -383,7 +388,7 @@ class Node:
         valid_edges = np.where(~branch_complete)[0]
 
         if len(valid_edges) == 0:
-            raise RuntimeError("All branches are complete; no valid moves.")
+            return None
 
         # Use only valid edges in PUCT calculation
         visits = np.sum(edge_N[valid_edges])

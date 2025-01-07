@@ -12,9 +12,9 @@ if __name__ == '__main__':
     chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_127.pt")
     chess_net.eval()
 
-    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net)
+    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, multiprocess=True)
 
-    sims = 1000
+    sims = 5000
 
     node = tree.root
 
@@ -47,7 +47,7 @@ if __name__ == '__main__':
         print('\n')
         print(main_board)
 
-        print([f"{edge.move} {edge.N} {edge.Q.item():.4f}, {edge.P.item():.3f} \n" for edge in tree.root.edges])
+        print([f"{edge.move} {edge.N} {edge.Q:.4f}, {edge.P:.3f} \n" for edge in tree.root.edges])
 
         print(sum([edge.P for edge in tree.root.edges]))
 
