@@ -1,4 +1,5 @@
 from multiprocessing import Process, Queue, Lock
+from queue import Empty
 
 from transformers.models.musicgen_melody.modeling_musicgen_melody import MusicgenMelodyOutputWithPast
 
@@ -12,7 +13,7 @@ class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallelwith MCTS"""
 
     def __init__(self, neural_net: ChessNet, process_queue, results_queue, experience_queue,
-                 batch_size: int = 32, nn_load_path: str = None):
+                 batch_size: int = 64, nn_load_path: str = None):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -40,12 +41,14 @@ class NeuralNetHandling(Process):
                 hashes = []
                 states = []
                 legal_moves = []
+                visited_edges_hashes = []
 
                 for _ in range(min(self.process_queue.qsize(), self.batch_size)):
-                    the_hash, state, legal_moves_strings = self.process_queue.get()
+                    the_hash, state, legal_moves_strings, visited_edges_hash = self.process_queue.get()
                     hashes.append(the_hash)
                     states.append(state)
                     legal_moves.append(legal_moves_strings)
+                    visited_edges_hashes.append(visited_edges_hash)
 
                 # Create the input tensors
                 state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
@@ -62,19 +65,21 @@ class NeuralNetHandling(Process):
                     for edge, move_idx in legal_move_key[idx]:
                         move_probs.append([edge, policies[idx][move_idx].item()])
 
-                    self.results_queue.put((the_hash, values[idx].item(), move_probs, legal_move_key[idx]))
+                    self.results_queue.put((the_hash, values[idx].item(), move_probs, legal_move_key[idx], visited_edges_hashes[idx]))
 
-            if not self.experience_queue.empty():
-                for _ in range(min(self.experience_queue.qsize(), self.batch_size)):
-                    state, moves, visit_counts, predicted_value, is_root_node =  self.experience_queue.get()
+            for _ in range(self.batch_size):
+                try:
+                    state, moves, visit_counts, predicted_value, is_root_node =  self.experience_queue.get_nowait()
                     self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, is_root_node)
+                except Empty:
+                    break
 
             self.train_neural_network()
                 
     def train_neural_network(self):
-        if len(self.memory) < 32:
+        if len(self.memory) < 64:
             return
-        states, moves, probs, wins = self.memory.get_batch(32)
+        states, moves, probs, wins = self.memory.get_batch(64)
         state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
         self.neural_net.loss_function(state, target=(wins, moves), legal_move_mask=legal_move_mask)
 

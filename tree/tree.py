@@ -19,6 +19,7 @@ import chess_moves
 import torch
 
 from multiprocessing import Process, Manager, Queue, Lock
+from queue import Empty
 
 from typing import List
 from line_profiler import profile
@@ -62,12 +63,14 @@ class GameTree:
         else:
             self.process_queue = Queue()
             self.process_queue_node_lookup = {}
+            self.awaiting_backpropagation_lookup = {}
+
             self.experience_queue = Queue()
             self.results_queue = Queue()
 
             self.evaluator = NeuralNetHandling(neural_net=neural_net, process_queue=self.process_queue,
                                                experience_queue=self.experience_queue,
-                                               results_queue=self.results_queue, batch_size=32)
+                                               results_queue=self.results_queue, batch_size=128)
             self.evaluator.start()
 
     def reset(self):
@@ -99,6 +102,7 @@ class GameTree:
 
                     # Append edge to visited list
                     visited_edges.append(edge)
+                    edge.N += 1
 
                     # Get new node and then a new edge
                     current_node = edge.child_node
@@ -127,15 +131,27 @@ class GameTree:
                         current_node.V = value
                         reward += value
                         reward /= 2
+                        self.backpropagation(visited_edges, reward)
                     else:
-                        # TODO: current_node is massive overkill for communication
-                        node_hash = hash(current_node)
-                        states = current_node.state
-                        legal_moves = current_node.legal_move_strings
-                        self.process_queue_node_lookup[node_hash] = current_node
-                        self.process_queue.put((node_hash, states, legal_moves))
 
-                self.backpropagation(visited_edges, reward)
+                        # Save the backpropagation until node results have returned
+                        visited_edges_tuple = tuple(visited_edges)
+                        visited_edges_hash = hash(visited_edges_tuple)
+
+                        if visited_edges_hash not in self.awaiting_backpropagation_lookup:
+                            self.awaiting_backpropagation_lookup[visited_edges_hash] = visited_edges_tuple
+
+                            # TODO: current_node is massive overkill for communication
+                            node_hash = hash(current_node)
+                            states = current_node.state
+                            legal_moves = current_node.legal_move_strings
+
+                            self.process_queue_node_lookup[node_hash] = current_node
+
+                            self.process_queue.put((node_hash, states, legal_moves, visited_edges_hash))
+
+                            # Set virtual loss to discourage search down here for a bit
+                            self.virtual_loss = -10.
 
                 # Now return to root node
                 current_node = self.root
@@ -171,7 +187,6 @@ class GameTree:
                 flip = -1
 
             # Increment the visit count and update the total reward
-            edge.N += 1
             edge.W += gamma_factor * flip * observed_reward
 
             # Unlock the edge for further exploration
@@ -208,41 +223,58 @@ class GameTree:
             self.experience_queue.put((state, moves, visit_counts, predicted_value, current_node is root_node))
 
     def apply_neural_net_results(self):
+        """
+        Process results from the neural network in batches, updating nodes and applying Dirichlet noise.
+        """
+        max_batch_size = 64  # Process up to 10 items at a time
 
-        for _ in range(min(self.process_queue.qsize(), 10)):
+        # Collect a batch of items from the queue
+        results = []
+        for _ in range(max_batch_size):
+            try:
+                results.append(self.results_queue.get_nowait())  # Non-blocking get
+            except Empty:
+                break
 
-            the_hash, value, move_probs, index_map = self.results_queue.get()
+        if not results:
+            return  # No results to process
 
+        for the_hash, value, move_probs, index_map, visited_edges_hash in results:
+            # Retrieve the node associated with this hash
             node = self.process_queue_node_lookup.pop(the_hash)
 
+            # Update node value
             node.V = value
 
+            # Update parent's edge total value if applicable
             if node.parent_edge is not None:
                 node.parent_edge.W += value
 
-            # Define the alpha parameter for Dirichlet distribution and the weighting factor
-            alpha = 0.3  # You can adjust this value depending on your needs
-            epsilon = 0.25  # Weight for blending original policy and noise
+            # Parameters for Dirichlet noise
+            alpha = 0.3  # Dirichlet distribution parameter
+            epsilon = 0.25  # Blending factor
 
-            # Assosciate probability with its edge
-            for edge, prob in zip(node.edges, move_probs):
-                edge.P = prob[-1]
+            # Convert move probabilities to a numpy array
+            Ps = np.array([prob[-1] for prob in move_probs])
 
-            Ps = np.array([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges])
+            # Normalize probabilities
+            sum_Ps = Ps.sum()
+            if sum_Ps > 1e-6:
+                Ps /= sum_Ps
+            else:
+                Ps = np.ones_like(Ps) / len(Ps)  # Assign uniform probability if sum is too small
 
-            sum_Ps = np.sum(Ps)
-
-            if sum_Ps <= 1e-6:
-                Ps = np.ones_like(Ps) / len(Ps)
-                sum_Ps = np.sum(Ps)
-
-            # Generate Dirichlet noise
+            # Apply Dirichlet noise
             dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
+            Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
 
-            Ps = (1 - epsilon) * Ps / (sum_Ps + 1e-6) + epsilon * dirichlet_noise
+            # Update edge probabilities
+            for edge, prob in zip(node.edges, Ps):
+                edge.P = prob
 
-            for idx, edge in enumerate(node.edges):
-                edge.P = Ps[idx]
+            # Perform backpropagation
+            visited_edges = self.awaiting_backpropagation_lookup.pop(visited_edges_hash)
+            self.backpropagation(visited_edges, value)
 
 
     def train_neural_network_local(self):
