@@ -105,7 +105,7 @@ class GameTree:
 
                 # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
                 move = current_node.puct(thread_num, rng_generator=thread_rng)
-                visited_moves: List[Edge] = [move]
+                visited_moves: List[Move] = [move]
 
                 while move.child_node and not current_node.branch_complete:
 
