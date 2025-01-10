@@ -33,11 +33,11 @@ if __name__ == '__main__':
         #TODO: sort out now visiting
 
         if ctr < 30:
-            tau = 0.5
+            tau = 0.01
         else:
-            tau = 0.1
+            tau = 0.01
 
-        node, move = tree.root.select_new_root_node(tau=tau)
+        node, move = tree.root.greedy_select_new_root_node()
 
         chess_move = chess.Move.from_uci(move)
         main_board.push(chess_move)
@@ -47,17 +47,15 @@ if __name__ == '__main__':
         print('\n')
         print(main_board)
 
-        print([f"{edge.move} {edge.N} {edge.Q:.4f}, {edge.P:.3f} \n" for edge in tree.root.edges])
-
-        print(sum([edge.P for edge in tree.root.edges]))
 
         with open(f"save_game/move_{ctr}.svg", "w") as file:
             file.write(svg)
 
-        print(f"Move: {move}")
+        print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
         print(f"Game over: {main_board.is_game_over()}")
         print('\n')
         tree.root = node
+        tree.root.parent_move = None
 
         if main_board.is_checkmate():
             print("Checkmate!")

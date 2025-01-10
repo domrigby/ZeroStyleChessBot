@@ -13,7 +13,7 @@ if __name__ == '__main__':
 
     # tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, training=True)
 
-    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, training=True, multiprocess=True, num_evalators=2)
+    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, training=True, multiprocess=True)
 
     sims = 1000
     max_length = 400
@@ -56,7 +56,10 @@ if __name__ == '__main__':
             tree.root = node
 
             # Clear references to the tree above
-            tree.root.parent_edge = None
+            tree.root.parent_move = None
+
+            # Increment move count
+            move_count += 1
 
             if main_board.is_checkmate():
                 print("Checkmate!")

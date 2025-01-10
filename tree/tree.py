@@ -1,7 +1,5 @@
 import multiprocessing as mp
 
-from duplicity.config import current_time
-
 try:
    mp.set_start_method('spawn', force=True)
    print("spawned")
@@ -21,7 +19,7 @@ import torch
 from multiprocessing import Process, Manager, Queue, Lock
 from queue import Empty
 
-from typing import List
+from typing import List, Optional, Union, Dict
 from line_profiler import profile
 
 from tree.memory import Memory
@@ -32,6 +30,9 @@ from tree.trainer import TrainingProcess
 
 
 class GameTree:
+
+    add_dirichlet_noise = False
+
     def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                  neural_net = None, manager: Manager = None, training: bool =  False,
@@ -62,8 +63,10 @@ class GameTree:
             self.neural_net = neural_net
             self.memory = Memory(100000)
         else:
+
+            # Create the queues
             self.process_queue = Queue()
-            self.process_queue_node_lookup = {}
+            self.process_queue_node_lookup: Dict[int, tuple] = {}
 
             self.experience_queue = Queue()
             self.results_queue = Queue()
@@ -101,20 +104,24 @@ class GameTree:
             for idx in range(thread_num_expansions):
 
                 # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
-                edge = current_node.puct(thread_num, rng_generator=thread_rng)
-                visited_edges: List[Edge] = [edge]
+                move = current_node.puct(thread_num, rng_generator=thread_rng)
+                visited_moves: List[Edge] = [move]
 
-                while edge.child_node and not current_node.branch_complete:
+                while move.child_node and not current_node.branch_complete:
 
-                    # Append edge to visited list
-                    visited_edges.append(edge)
-                    edge.N += 1
+                    # Append move to visited list
+                    visited_moves.append(move)
+                    move.N += 1
 
-                    # Get new node and then a new edge
-                    current_node = edge.child_node
+                    # Get new node and then a new move
+                    current_node = move.child_node
+
+                    while all(move.child_node and move.child_node.awaiting_processing for move in current_node.moves):
+                        print('Waiting')
+                        time.sleep(0.0001)
 
                     if not current_node.branch_complete:
-                        edge = current_node.puct(rng_generator=thread_rng)
+                        move = current_node.puct(rng_generator=thread_rng)
 
                     if not self.multiprocess and self.training and idx % 30 == 0:
                         self.train_neural_network_local()
@@ -122,30 +129,34 @@ class GameTree:
                     if self.multiprocess:
                         self.apply_neural_net_results()
 
-                    if edge is None:
+                    if move is None:
                         break
+
+                    # Set virtual loss to discourage search down here for a bit
+                    if self.multiprocess:
+                        move.virtual_loss = -1.
 
                     # Currently have an issue with time exploding in the late game
                     time_now = time.time()
                     if time_now - start_time > time_limit:
                         break
 
-                if not current_node.branch_complete:
+                if not current_node.branch_complete and move is not None:
                     # If the graph is complete its already been done
 
-                    current_node, reward, done = edge.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
+                    current_node, reward, done = move.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
 
                     if not self.multiprocess:
                         value = self.neural_net.node_evaluation(current_node)
                         current_node.V = value
                         reward += value
                         reward /= 2
-                        self.backpropagation(visited_edges, reward)
+                        self.backpropagation(visited_moves, reward)
                     else:
 
                         # Save the backpropagation until node results have returned
 
-                        # TODO: current_node is massive overkill for communication
+                        # Create a hash of the node such that we can relocate this node later
                         node_hash = hash(current_node)
 
                         if node_hash not in self.process_queue_node_lookup:
@@ -153,12 +164,12 @@ class GameTree:
                             states = current_node.state
                             legal_moves = current_node.legal_move_strings
 
-                            self.process_queue_node_lookup[node_hash] = (current_node, visited_edges)
+                            self.process_queue_node_lookup[node_hash] = (current_node, visited_moves)
 
                             self.process_queue.put((node_hash, states, legal_moves))
 
-                            # Set virtual loss to discourage search down here for a bit
-                            self.virtual_loss = -10.
+                            # Set the node is current node is awaiting processing
+                            current_node.awaiting_processing = False
 
                 # Now return to root node
                 current_node = self.root
@@ -177,27 +188,25 @@ class GameTree:
 
         search_down_tree(self.env, number_of_expansions // self.num_workers, current_node, 0, time_limit=time_limit)
 
-
-
-    def backpropagation(self, visited_edges, observed_reward: float):
+    def backpropagation(self, visited_moves, observed_reward: float):
 
         gamma_factor = 1
 
-        player = visited_edges[-1].parent_node.player
+        player = visited_moves[-1].parent_node.player
 
-        for edge in reversed(visited_edges):
+        for move in reversed(visited_moves):
 
-            if edge.parent_node.player == player:
+            if move.parent_node.player == player:
                 # Flip for when the other player is observing reward
                 flip = 1
             else:
                 flip = -1
 
             # Increment the visit count and update the total reward
-            edge.W += gamma_factor * flip * observed_reward
+            move.W += gamma_factor * flip * observed_reward
 
-            # Unlock the edge for further exploration
-            edge.virtual_loss = 0
+            # Unlock the move for further exploration
+            move.virtual_loss = 0
 
             gamma_factor *= 1
 
@@ -209,9 +218,9 @@ class GameTree:
             if node.branch_complete or count > 400:
                 return
 
-            for edge in node.edges:
-                if edge.N >= 100:
-                    recursive_search(edge.child_node, count + 1)
+            for move in node.moves:
+                if move.N >= 100:
+                    recursive_search(move.child_node, count + 1)
 
             return
 
@@ -220,8 +229,8 @@ class GameTree:
     def save_results_to_memory(self, current_node, root_node):
 
         state = current_node.state
-        moves = [edge.move for edge in current_node.edges]
-        visit_counts = [edge.N for edge in current_node.edges]
+        moves = [move.move for move in current_node.moves]
+        visit_counts = [move.N for move in current_node.moves]
         predicted_value = current_node.V
 
         if not self.multiprocess:
@@ -248,17 +257,18 @@ class GameTree:
 
         for the_hash, value, move_probs, index_map in results:
             # Retrieve the node associated with this hash
-            node, visited_edges = self.process_queue_node_lookup.pop(the_hash)
+            node, visited_moves = self.process_queue_node_lookup.pop(the_hash)
 
             # Update node value
             node.V = value
 
-            # Update parent's edge total value if applicable
-            if node.parent_edge is not None:
-                node.parent_edge.W += value
+            # Update parent's move total value if applicable
+            if node.parent_move is not None:
+                node.parent_move.W += value
 
             # Parameters for Dirichlet noise
             alpha = 0.3  # Dirichlet distribution parameter
+            epsilon = 0.25  # Blending factor
             epsilon = 0.25  # Blending factor
 
             # Convert move probabilities to a numpy array
@@ -272,14 +282,16 @@ class GameTree:
                 Ps = np.ones_like(Ps) / len(Ps)  # Assign uniform probability if sum is too small
 
             # Apply Dirichlet noise
-            dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
-            Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
+            if self.add_dirichlet_noise:
+                dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
+                Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
 
-            # Update edge probabilities
-            for edge, prob in zip(node.edges, Ps):
-                edge.P = prob
+            # Update move probabilities
+            for move, prob in zip(node.moves, Ps):
+                move.P = prob
 
-            self.backpropagation(visited_edges, value)
+            node.awaiting_processing = False
+            self.backpropagation(visited_moves, value)
 
 
     def train_neural_network_local(self):
@@ -314,36 +326,39 @@ class ThreadLocalNodePool:
 class Node:
 
     DEFAULT_EDGE_NUM = 24
-    def __init__(self, board=None, parent_edge=None, state=None):
+    def __init__(self, board=None, parent_move=None, state=None):
 
         if board is not None:
-            # TODO: sort out edge initialisation
-            self.edges: List[Edge] = []
-            self.re_init(state, board, parent_edge)
+            # TODO: sort out move initialisation
+            self.moves: List[Move] = []
+            self.re_init(state, board, parent_move)
         else:
             # Initialise empty forms of the class
-            self.state: str = None  # The chess fen string object representing this state
-            self.parent_edge: Edge = None
-            self.player = None
+            self.state: Optional[str] = None  # The chess fen string object representing this state
+            self.parent_move: Optional[Move] = None
+            self.player: Optional[str] = None
 
             self.number_legal_moves: int = 0
-            self.branch_complete = False  # Flag to indicate if the branch has been fully searched
+            self.branch_complete: bool = False  # Flag to indicate if the branch has been fully searched
 
-            self.edges: List[Edge] = [Edge() for _ in range(self.DEFAULT_EDGE_NUM)]
+            self.moves: List[Move] = [Move() for _ in range(self.DEFAULT_EDGE_NUM)]
 
-            self.has_policy = False
-            self.team = None
+            self.has_policy: bool = False
+            self.team: Optional[str] = None
 
             # State value
-            self.V = 0
+            self.V: float = 0
 
-    def re_init(self, state:str, board, parent_edge=None):
+            # Set a flag saying it has not been processed yet
+            self.awaiting_processing: bool = True
+
+    def re_init(self, state:str, board, parent_move=None):
 
         self.state = state  # The chess fen string object representing this state
         self.player = self.state.split()[1]
         assert self.player in ['w', 'b'], ValueError('Player must be w or b')
 
-        self.parent_edge = parent_edge  # Reference to the parent edge
+        self.parent_move = parent_move  # Reference to the parent move
 
         board.set_fen(self.state)
         legal_moves =  board.legal_moves()
@@ -356,16 +371,16 @@ class Node:
         else:
             self.branch_complete = False
 
-        created_edge_num = len(self.edges)
+        created_move_num = len(self.moves)
         for idx, move in enumerate(legal_moves):
-            if idx < created_edge_num:
-                self.edges[idx].re_init(self, move)
+            if idx < created_move_num:
+                self.moves[idx].re_init(self, move)
             else:
-                self.edges.append(Edge(self, move))
+                self.moves.append(Move(self, move))
 
-        if self.number_legal_moves < len(self.edges):
-            # Get rid of excess edges
-            self.edges = self.edges[:self.number_legal_moves]
+        if self.number_legal_moves < len(self.moves):
+            # Get rid of excess moves
+            self.moves = self.moves[:self.number_legal_moves]
 
         self.has_policy = False
         self.team = "white" if self.state.split()[1] == 'w' else "black"
@@ -375,43 +390,53 @@ class Node:
 
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
         """
-        Select the best edge using the PUCT formula,
-        ignoring edges that lead to completed branches.
+        Select the best move using the PUCT formula,
+        ignoring moves that lead to completed branches.
         """
-        edge_N = np.array([edge.N for edge in self.edges])
-        edge_P = np.array([edge.P for edge in self.edges])
-        edge_Q = np.array([edge.Q for edge in self.edges])
-        edge_virtual_loss = np.array([edge.virtual_loss for edge in self.edges])
-        branch_complete = np.array([edge.child_node.branch_complete if edge.child_node is not None else False for edge in self.edges])
+        move_N = np.array([move.N for move in self.moves])
+        move_P = np.array([move.P for move in self.moves])
+        move_Q = np.array([move.Q for move in self.moves])
+        move_virtual_loss = np.array([move.virtual_loss for move in self.moves])
+        branch_complete = np.array([move.child_node.branch_complete if move.child_node is not None else False for move in self.moves])
 
         # Ignore completed branches
-        valid_edges = np.where(~branch_complete)[0]
+        valid_moves = np.where(~branch_complete)[0]
 
-        if len(valid_edges) == 0:
+        if len(valid_moves) == 0:
             return None
 
-        # Use only valid edges in PUCT calculation
-        visits = np.sum(edge_N[valid_edges])
-        puct_values = (edge_Q[valid_edges] + edge_virtual_loss[valid_edges]) + \
-                      5.0 * edge_P[valid_edges] * np.sqrt(visits + 1) / (edge_N[valid_edges] + 1)
+        # Use only valid moves in PUCT calculation
+        visits = np.sum(move_N[valid_moves])
+        puct_values = (move_Q[valid_moves] + move_virtual_loss[valid_moves]) + \
+                      5.0 * move_P[valid_moves] * np.sqrt(visits + 1) / (move_N[valid_moves] + 1)
 
-        # Select the edge with the maximum PUCT value
-        best_index = valid_edges[np.argmax(puct_values)]
+        # Select the move with the maximum PUCT value
+        best_value = np.max(puct_values)
+        best_indexes = np.where(puct_values == best_value)[0]
 
-        return self.edges[best_index]
+        best_index = rng_generator.choice(best_indexes)
+
+        return self.moves[best_index]
 
     def select_new_root_node(self, tau: float = 1.0):
-        Ns = np.array([edge.N for edge in self.edges])
+        Ns = np.array([move.N for move in self.moves])
         N_to_tau = np.power(Ns, 1./tau)
         probs = N_to_tau / np.sum(N_to_tau)
-        chosen_edge = np.random.choice(self.edges, p=probs)
-        return chosen_edge.child_node, chosen_edge.move
+        chosen_move = np.random.choice(self.moves, p=probs)
+        return chosen_move.child_node, chosen_move.move
+
+    def greedy_select_new_root_node(self):
+        Qs = np.array([move.Q for move in self.moves])
+        chosen_idx = np.argmax(Qs)
+        chosen_move = self.moves[chosen_idx]
+        print(Qs)
+        return chosen_move.child_node, chosen_move.move
 
     @property
     def legal_move_strings(self):
-        return [str(edge) for edge in self.edges]
+        return [str(move) for move in self.moves]
 
-class Edge:
+class Move:
 
     def __init__(self, parent_node: Node = None, move=None):
 
@@ -450,9 +475,9 @@ class Edge:
         # Create a new child node
         if node_queue is not None:
             self.child_node = node_queue.get(thread_num)
-            self.child_node.re_init(new_state, board, parent_edge=self)
+            self.child_node.re_init(new_state, board, parent_move=self)
         else:  # If no queue provided, create a new node directly
-            self.child_node = Node(board, parent_edge=self)
+            self.child_node = Node(board, parent_move=self)
 
         # Calculate the reward
         done, result_code = board.is_game_over()
@@ -494,9 +519,9 @@ if __name__ == '__main__':
     end_time = time.time()
 
     print(f"Time with parallel search {end_time-start_time:.3f}")
-    print(sum([edge.N for edge in tree.root.edges]))
+    print(sum([move.N for move in tree.root.moves]))
 
-    best_moves = sorted(tree.root.edges, key= lambda x: x.Q, reverse=True)
+    best_moves = sorted(tree.root.moves, key= lambda x: x.Q, reverse=True)
 
     # Create the root of the tree
     initial_board = chess.Board()
