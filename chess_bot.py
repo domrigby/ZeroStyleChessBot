@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
     tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, multiprocess=True)
 
-    sims = 5000
+    sims = 1000
 
     node = tree.root
 

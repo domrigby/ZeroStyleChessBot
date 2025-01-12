@@ -53,6 +53,11 @@ if __name__ == '__main__':
 
             print(main_board)
 
+            print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
+            print(f"Game over: {main_board.is_game_over()}")
+            print(f"Memory length: {len(tree.trainer.memory)} Process queue: {tree.process_queue.qsize()}")
+            print('\n')
+
             tree.root = node
 
             # Clear references to the tree above

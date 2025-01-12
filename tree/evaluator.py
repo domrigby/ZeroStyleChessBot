@@ -1,5 +1,6 @@
 from multiprocessing import Process, Queue, Lock
 from queue import Empty
+import torch.multiprocessing as torch_mp
 
 from transformers.models.musicgen_melody.modeling_musicgen_melody import MusicgenMelodyOutputWithPast
 
@@ -12,10 +13,10 @@ from neural_nets.conv_net import ChessNet
 class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallelwith MCTS"""
 
-    test_mode = True
+    test_mode = False
 
-    def __init__(self, neural_net: ChessNet, process_queue, results_queue,
-                 batch_size: int = 64, nn_load_path: str = None):
+    def __init__(self, neural_net: ChessNet, process_queue, results_queue, nn_queue: torch_mp.Queue,
+                 batch_size: int = 64):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -23,6 +24,7 @@ class NeuralNetHandling(Process):
         super().__init__()
         self.process_queue = process_queue
         self.results_queue = results_queue
+        self.nn_queue = nn_queue
 
         self.running = True
 
@@ -53,7 +55,7 @@ class NeuralNetHandling(Process):
                     except Empty:
                         break
 
-                if True:
+                if self.test_mode:
                     self.test_mode_func(hashes, states, legal_moves)
                     continue
 
@@ -76,6 +78,13 @@ class NeuralNetHandling(Process):
                             move_probs.append([edge, policies[idx][move_idx].item()])
 
                         self.results_queue.put((the_hash, values[idx].item(), move_probs, legal_move_key[idx]))
+
+                if self.nn_queue.qsize() > 0:
+                    try:
+                        state_dict = self.nn_queue.get_nowait()
+                        self.neural_net.load_state_dict(state_dict)
+                    except Empty:
+                        pass
 
 
     def test_mode_func(self, hashes, states, legal_moves):

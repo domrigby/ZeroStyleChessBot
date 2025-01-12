@@ -18,6 +18,7 @@ import torch
 
 from multiprocessing import Process, Manager, Queue, Lock
 from queue import Empty
+import torch.multiprocessing as torch_mp
 
 from typing import List, Optional, Union, Dict
 from line_profiler import profile
@@ -32,6 +33,7 @@ from tree.trainer import TrainingProcess
 class GameTree:
 
     add_dirichlet_noise = False
+    minimax_over_mean = True
 
     def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
@@ -71,13 +73,17 @@ class GameTree:
             self.experience_queue = Queue()
             self.results_queue = Queue()
 
+            # Create the multiprocess queue
+            nn_update = torch_mp.Queue()
+
             self.evaluators: List[NeuralNetHandling] = []
 
             for _ in range(num_evalators):
                 self.evaluators.append(NeuralNetHandling(neural_net=neural_net, process_queue=self.process_queue,
-                                               results_queue=self.results_queue, batch_size=128))
+                                                         results_queue=self.results_queue, nn_queue=nn_update,
+                                                         batch_size=128))
 
-            self.trainer = TrainingProcess(neural_net=neural_net, experience_queue=self.experience_queue, batch_size=128)
+            self.trainer = TrainingProcess(neural_net=neural_net, experience_queue=self.experience_queue, nn_queue=nn_update, batch_size=128)
 
             [evaluator.start() for evaluator in self.evaluators]
             self.trainer.start()
@@ -104,24 +110,58 @@ class GameTree:
             for idx in range(thread_num_expansions):
 
                 # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
-                move = current_node.puct(thread_num, rng_generator=thread_rng)
-                visited_moves: List[Move] = [move]
+                visited_moves: List[Move] = []
+                move_has_child_node = True
 
-                while move.child_node and not current_node.branch_complete:
+                # Expand to leaf
+                while move_has_child_node and not current_node.branch_complete:
 
-                    # Append move to visited list
+                    # Select
+                    move = current_node.puct(rng_generator=thread_rng)
                     visited_moves.append(move)
+
+                    # Statistics
                     move.N += 1
 
-                    # Get new node and then a new move
-                    current_node = move.child_node
+                    # Set virtual loss to discourage search down here for a bit
+                    if self.multiprocess:
+                        move.virtual_loss -= 1.
 
-                    while all(move.child_node and move.child_node.awaiting_processing for move in current_node.moves):
-                        print('Waiting')
-                        time.sleep(0.0001)
+                    if move.child_node:
 
-                    if not current_node.branch_complete:
-                        move = current_node.puct(rng_generator=thread_rng)
+                        # Get new node and then a new move
+                        current_node = move.child_node
+
+                    else:
+                        # We have found a leaf move
+                        move_has_child_node = False
+
+                    # If all nodes are awaiting processing... there is nowhere to expand so go back to the top
+                    if all(move.child_node and move.child_node.awaiting_processing for move in current_node.moves):
+
+                        self.undo_informationless_rollout(visited_moves)
+
+                        current_node = self.root
+                        visited_moves = []
+
+                        print("Resetting")
+
+                        counter = 0
+
+                        # Below check checks that we have not reached node in which all nodes are awaiting processing
+                        # This would mean we are seriously behind
+                        while self.multiprocess and (move.child_node and move.child_node.awaiting_processing
+                                                     and not move.child_node.branch_complete
+                                                     for move in current_node.moves):
+
+                            print(f"\rWaiting {counter}", end='')
+                            self.apply_neural_net_results()
+                            counter += 1
+
+                    # If the queue has become too fully than wait for it to process... get it down to batch size for the
+                    # actual call to finish off
+                    while self.multiprocess and self.process_queue.qsize() > 128:
+                        self.apply_neural_net_results()
 
                     if not self.multiprocess and self.training and idx % 30 == 0:
                         self.train_neural_network_local()
@@ -130,15 +170,6 @@ class GameTree:
                         self.apply_neural_net_results()
 
                     if move is None:
-                        break
-
-                    # Set virtual loss to discourage search down here for a bit
-                    if self.multiprocess:
-                        move.virtual_loss = -1.
-
-                    # Currently have an issue with time exploding in the late game
-                    time_now = time.time()
-                    if time_now - start_time > time_limit:
                         break
 
                 if not current_node.branch_complete and move is not None:
@@ -152,9 +183,8 @@ class GameTree:
                         reward += value
                         reward /= 2
                         self.backpropagation(visited_moves, reward)
-                    else:
 
-                        # Save the backpropagation until node results have returned
+                    else:
 
                         # Create a hash of the node such that we can relocate this node later
                         node_hash = hash(current_node)
@@ -170,6 +200,10 @@ class GameTree:
 
                             # Set the node is current node is awaiting processing
                             current_node.awaiting_processing = False
+
+                        else:
+                            # TODO: handle these better
+                            self.undo_informationless_rollout(visited_moves)
 
                 # Now return to root node
                 current_node = self.root
@@ -188,27 +222,44 @@ class GameTree:
 
         search_down_tree(self.env, number_of_expansions // self.num_workers, current_node, 0, time_limit=time_limit)
 
+    @staticmethod
+    def undo_informationless_rollout(visited_moves):
+        for move in visited_moves:
+            # Undo stats
+            move.N -= 1
+            move.virtual_loss += 1
+
     def backpropagation(self, visited_moves, observed_reward: float):
 
         gamma_factor = 1
 
         player = visited_moves[-1].parent_node.player
 
-        for move in reversed(visited_moves):
+        for idx, move in enumerate(reversed(visited_moves)):
+
+            # After doing a need evaluation, we get the other players chance of winning...
+            # We therefore flip the score when it us playing
 
             if move.parent_node.player == player:
                 # Flip for when the other player is observing reward
-                flip = 1
-            else:
                 flip = -1
+            else:
+                flip = 1
 
             # Increment the visit count and update the total reward
-            move.W += gamma_factor * flip * observed_reward
+            new_Q = gamma_factor**idx * flip * observed_reward
 
-            # Unlock the move for further exploration
-            move.virtual_loss = 0
+            move.W += new_Q
 
-            gamma_factor *= 1
+            if self.multiprocess:
+                move.virtual_loss += 1
+
+            # We have just expanded the tree and found a new state and got a new value for it
+            # Game theory logic:
+            #   If it was expanded to be this players turn... previous moves now have this value if it is higher than
+            #   the previous Qs (they will choose to pursue this game state
+            #   If it is not this player
+
 
     def search_for_sufficiently_visited_nodes(self, root_node):
         def recursive_search(node, count):
@@ -219,7 +270,7 @@ class GameTree:
                 return
 
             for move in node.moves:
-                if move.N >= 100:
+                if move.N >= 100 and move.child_node:
                     recursive_search(move.child_node, count + 1)
 
             return
@@ -242,9 +293,8 @@ class GameTree:
         """
         Process results from the neural network in batches, updating nodes and applying Dirichlet noise.
         """
-        max_batch_size = 64  # Process up to 10 items at a time
+        max_batch_size = 128  # Process up to 10 items at a time
 
-        # Collect a batch of items from the queue
         results = []
         for _ in range(max_batch_size):
             try:
@@ -252,46 +302,45 @@ class GameTree:
             except Empty:
                 break
 
-        if not results:
-            return  # No results to process
+        if results:
 
-        for the_hash, value, move_probs, index_map in results:
-            # Retrieve the node associated with this hash
-            node, visited_moves = self.process_queue_node_lookup.pop(the_hash)
+            for the_hash, value, move_probs, index_map in results:
 
-            # Update node value
-            node.V = value
+                # Retrieve the node associated with this hash
+                node, visited_moves = self.process_queue_node_lookup.pop(the_hash)
 
-            # Update parent's move total value if applicable
-            if node.parent_move is not None:
-                node.parent_move.W += value
+                # Update node value
+                node.V = value
 
-            # Parameters for Dirichlet noise
-            alpha = 0.3  # Dirichlet distribution parameter
-            epsilon = 0.25  # Blending factor
-            epsilon = 0.25  # Blending factor
+                # Update parent's move total value if applicable
+                if node.parent_move is not None:
+                    node.parent_move.W += value
 
-            # Convert move probabilities to a numpy array
-            Ps = np.array([prob[-1] for prob in move_probs])
+                # Parameters for Dirichlet noise
+                alpha = 0.3  # Dirichlet distribution parameter
+                epsilon = 0.25  # Blending factor
 
-            # Normalize probabilities
-            sum_Ps = Ps.sum()
-            if sum_Ps > 1e-6:
-                Ps /= sum_Ps
-            else:
-                Ps = np.ones_like(Ps) / len(Ps)  # Assign uniform probability if sum is too small
+                # Convert move probabilities to a numpy array
+                Ps = np.array([prob[-1] for prob in move_probs])
 
-            # Apply Dirichlet noise
-            if self.add_dirichlet_noise:
-                dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
-                Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
+                # Normalize probabilities
+                sum_Ps = Ps.sum()
+                if sum_Ps > 1e-6:
+                    Ps /= sum_Ps
+                else:
+                    Ps = np.ones_like(Ps) / len(Ps)  # Assign uniform probability if sum is too small
 
-            # Update move probabilities
-            for move, prob in zip(node.moves, Ps):
-                move.P = prob
+                # Apply Dirichlet noise
+                if self.add_dirichlet_noise:
+                    dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
+                    Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
 
-            node.awaiting_processing = False
-            self.backpropagation(visited_moves, value)
+                # Update move probabilities
+                for move, prob in zip(node.moves, Ps):
+                    move.P = prob
+
+                node.awaiting_processing = False
+                self.backpropagation(visited_moves, value)
 
 
     def train_neural_network_local(self):
@@ -407,7 +456,7 @@ class Node:
 
         # Use only valid moves in PUCT calculation
         visits = np.sum(move_N[valid_moves])
-        puct_values = (move_Q[valid_moves] + move_virtual_loss[valid_moves]) + \
+        puct_values = (move_Q[valid_moves]) + \
                       5.0 * move_P[valid_moves] * np.sqrt(visits + 1) / (move_N[valid_moves] + 1)
 
         # Select the move with the maximum PUCT value
@@ -427,9 +476,11 @@ class Node:
 
     def greedy_select_new_root_node(self):
         Qs = np.array([move.Q for move in self.moves])
-        chosen_idx = np.argmax(Qs)
-        chosen_move = self.moves[chosen_idx]
-        print(Qs)
+        illegit_moves = [True if move.N > 0 else False for move in self.moves]
+        Qs[illegit_moves] = -np.inf
+        q_max = np.max(Qs)
+        max_idxs = np.where(Qs==q_max)[0]
+        chosen_move = self.moves[np.random.choice(max_idxs)]
         return chosen_move.child_node, chosen_move.move
 
     @property
@@ -448,10 +499,14 @@ class Move:
 
         self.child_node = None
 
-        # Game statistics
+        # Move statistics
         self.W = 0.
         self.N = 0.
         self.P = 1.
+
+        # When minimax is turned on we used Q_max rather than Q mean
+        # This works under assumption than player will make their best move rather than a random one
+        self.Q_max = -np.inf
 
         # Multi-processing variables
         self.virtual_loss = 0
@@ -498,7 +553,8 @@ class Move:
 
     @property
     def Q(self):
-        Q =  self.W / self.N if self.N > 0 else torch.tensor(0)
+        # Virtual loss is the equivalent of
+        Q =  (self.W + self.virtual_loss) / self.N if self.N > 0 else torch.tensor(0)
         return Q
 
 #

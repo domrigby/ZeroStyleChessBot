@@ -76,12 +76,12 @@ class GenericNet(nn.Module):
             filename = os.path.join(self.save_dir, self.__class__.__name__) + '.pt'
         self.load_state_dict(torch.load(filename))
 
-    def create_legal_move_mask(self, edges, team: str = None):
+    def create_legal_move_mask(self, moves, team: str = None):
         # Create a tensor with all zeros, then set the indices corresponding to legal moves to 1
         legal_move_mask = torch.zeros(self.output_size)
         move_to_indices_lookup = []
 
-        for legal_move in edges:
+        for legal_move in moves:
             # Need to add pawn promotion
             if len(str(legal_move)) < 5:
 
@@ -115,7 +115,7 @@ class GenericNet(nn.Module):
 
         self.eval()
         with torch.no_grad():
-            legal_move_mask, index_map = self.create_legal_move_mask(node.edges, node.team)
+            legal_move_mask, index_map = self.create_legal_move_mask(node.moves, node.team)
             board_tensor = chess_engine.fen_to_tensor(node.state)
             value, policy = self(torch.tensor(board_tensor, dtype=torch.float32, device='cuda').unsqueeze(0),
                                       legal_move_mask)
@@ -124,11 +124,11 @@ class GenericNet(nn.Module):
         alpha = 0.3  # You can adjust this value depending on your needs
         epsilon = 0.25  # Weight for blending original policy and noise
 
-        # Assosciate probability with its edge
-        for edge, index in index_map:
-            edge.P = policy[0][index]
+        # Assosciate probability with its move
+        for move, index in index_map:
+            move.P = policy[0][index]
 
-        Ps = np.array([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges])
+        Ps = np.array([move.P.cpu().item() if torch.is_tensor(move.P) else move.P for move in node.moves])
 
         sum_Ps = np.sum(Ps)
 
@@ -139,13 +139,16 @@ class GenericNet(nn.Module):
         # Generate Dirichlet noise
         dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
 
-        Ps = (1-epsilon) * Ps / (sum_Ps + 1e-6) + epsilon * dirichlet_noise
+        Ps = (1-epsilon) * Ps / sum_Ps + epsilon * dirichlet_noise
 
-        for idx, edge in enumerate(node.edges):
-            edge.P  = Ps[idx]
+        for idx, move in enumerate(node.moves):
+            move.P  = Ps[idx]
 
-        if sum([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges]) < 0.95:
-            print(f"In tree: {sum([edge.P.cpu().item() if torch.is_tensor(edge.P) else edge.P for edge in node.edges])}")
+        if sum([move.P.cpu().item() if torch.is_tensor(move.P) else move.P for move in node.moves]) < 0.95:
+            print(f"In tree: {sum([move.P.cpu().item() if torch.is_tensor(move.P) else move.P for move in node.moves])}")
+
+        # Set flag saying it has been processed
+        node.awaiting_processing = False
 
         # Return value for backpropagation
         return value.cpu().item()
