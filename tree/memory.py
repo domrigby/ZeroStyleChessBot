@@ -56,8 +56,9 @@ class Memory:
 
         data_point = DataPoint(state, moves, probs, value)
 
-        if is_root_node:
-            self.turn_list.append(data_point)
+        # TODO work out how to integrate this with multiprocssing
+        # if is_root_node:
+        #     self.turn_list.append(data_point)
 
         self.data.append(data_point)
 

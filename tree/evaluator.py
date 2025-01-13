@@ -2,8 +2,6 @@ from multiprocessing import Process, Queue, Lock
 from queue import Empty
 import torch.multiprocessing as torch_mp
 
-from transformers.models.musicgen_melody.modeling_musicgen_melody import MusicgenMelodyOutputWithPast
-
 from tree.memory import Memory
 import numpy as np
 import chess_moves

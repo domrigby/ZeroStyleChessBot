@@ -1,7 +1,7 @@
 import chess
 import chess.svg
 import chess_moves
-from tree.tree import GameTree, Node
+from tree.tree import GameTree
 import time
 import torch
 
@@ -51,6 +51,7 @@ if __name__ == '__main__':
             chess_move = chess.Move.from_uci(move)
             main_board.push(chess_move)
 
+            print(f"Game {game}")
             print(main_board)
 
             print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")

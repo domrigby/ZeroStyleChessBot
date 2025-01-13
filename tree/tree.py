@@ -137,26 +137,24 @@ class GameTree:
                         move_has_child_node = False
 
                     # If all nodes are awaiting processing... there is nowhere to expand so go back to the top
-                    if all(move.child_node and move.child_node.awaiting_processing for move in current_node.moves):
+                    if all([move.child_node and move.child_node.awaiting_processing and not move.child_node.branch_complete for move in current_node.moves]):
 
-                        self.undo_informationless_rollout(visited_moves)
-
-                        current_node = self.root
-                        visited_moves = []
-
-                        print("Resetting")
-
-                        counter = 0
+                        # self.undo_informationless_rollout(visited_moves)
+                        #
+                        # current_node = self.root
+                        # visited_moves = []
 
                         # Below check checks that we have not reached node in which all nodes are awaiting processing
                         # This would mean we are seriously behind
-                        while self.multiprocess and (move.child_node and move.child_node.awaiting_processing
-                                                     and not move.child_node.branch_complete
-                                                     for move in current_node.moves):
-
-                            print(f"\rWaiting {counter}", end='')
+                        while self.multiprocess and all([move.child_node and move.child_node.awaiting_processing
+                                                        and not move.child_node.branch_complete
+                                                        for move in current_node.moves]) and not current_node.branch_complete:
+                            # BUG: empty list reutrns true! ... so when no moves wwe get stuck in a loop
+                            print(f"\rQueue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
                             self.apply_neural_net_results()
-                            counter += 1
+
+                        # # Go onto the next MCTS roll out to avoid getting stuck down here
+                        # break
 
                     # If the queue has become too fully than wait for it to process... get it down to batch size for the
                     # actual call to finish off
@@ -172,7 +170,7 @@ class GameTree:
                     if move is None:
                         break
 
-                if not current_node.branch_complete and move is not None:
+                if not current_node.branch_complete and move is not None and visited_moves:
                     # If the graph is complete its already been done
 
                     current_node, reward, done = move.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
@@ -199,7 +197,7 @@ class GameTree:
                             self.process_queue.put((node_hash, states, legal_moves))
 
                             # Set the node is current node is awaiting processing
-                            current_node.awaiting_processing = False
+                            current_node.awaiting_processing = True
 
                         else:
                             # TODO: handle these better
@@ -391,6 +389,7 @@ class Node:
             self.branch_complete: bool = False  # Flag to indicate if the branch has been fully searched
 
             self.moves: List[Move] = [Move() for _ in range(self.DEFAULT_EDGE_NUM)]
+            self.branch_complete = False
 
             self.has_policy: bool = False
             self.team: Optional[str] = None
@@ -399,7 +398,7 @@ class Node:
             self.V: float = 0
 
             # Set a flag saying it has not been processed yet
-            self.awaiting_processing: bool = True
+            self.awaiting_processing: bool = False
 
     def re_init(self, state:str, board, parent_move=None):
 
