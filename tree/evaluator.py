@@ -6,6 +6,8 @@ from tree.memory import Memory
 import numpy as np
 import chess_moves
 
+import torch
+
 from neural_nets.conv_net import ChessNet
 
 class NeuralNetHandling(Process):

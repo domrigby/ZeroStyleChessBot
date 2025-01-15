@@ -51,12 +51,13 @@ if __name__ == '__main__':
             chess_move = chess.Move.from_uci(move)
             main_board.push(chess_move)
 
-            print(f"Game {game}")
+
+            print(f"Game {game} Move: {move_count}")
             print(main_board)
 
             print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
             print(f"Game over: {main_board.is_game_over()}")
-            print(f"Memory length: {len(tree.trainer.memory)} Process queue: {tree.process_queue.qsize()}")
+            print(f"Memory length: {tree.saved_memory_local} Process queue: {tree.process_queue.qsize()}")
             print('\n')
 
             tree.root = node
@@ -78,6 +79,9 @@ if __name__ == '__main__':
                 print("Maximum move length")
             elif main_board.is_check():
                 print("King is in check!")
+
+            if len(tree.root.moves) == 0:
+                print("Game over")
 
         if winner == 'w':
             white_win = True

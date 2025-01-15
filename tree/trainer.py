@@ -7,6 +7,8 @@ from tree.memory import Memory
 import numpy as np
 import chess_moves
 
+import torch
+
 from neural_nets.conv_net import ChessNet
 
 
@@ -37,6 +39,7 @@ class TrainingProcess(Process):
         self.memory = Memory(100000)
 
     def run(self):
+
         # If there are states in the qy
 
         while self.running:
@@ -61,10 +64,10 @@ class TrainingProcess(Process):
 
         self.training_count += 1
 
-        if self.training_count % 1000 == 0:
-            # Save the netowrk and put it in the queue to be loaded by the evaluator
-            self.neural_net.save_network(f"networks/network_{self.training_count}.pt")
-            self.nn_queue.put(self.neural_net.state_dict())
+        # if self.training_count % 1000 == 0:
+        #     # Save the netowrk and put it in the queue to be loaded by the evaluator
+        #     self.neural_net.save_network(f"networks/network_{self.training_count}.pt")
+        #     self.nn_queue.put(self.neural_net.state_dict())
 
     def update_node_and_edges(self, state, evaluation):
         pass

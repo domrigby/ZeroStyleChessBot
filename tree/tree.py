@@ -60,6 +60,9 @@ class GameTree:
         self.training = training
         self.multiprocess = multiprocess
 
+        # Local count for the number of memories we've saved
+        self.saved_memory_local = 0
+
         self.neural_net = None
         if not self.multiprocess:
             self.neural_net = neural_net
@@ -77,6 +80,8 @@ class GameTree:
             nn_update = torch_mp.Queue()
 
             self.evaluators: List[NeuralNetHandling] = []
+
+            neural_net.share_memory()
 
             for _ in range(num_evalators):
                 self.evaluators.append(NeuralNetHandling(neural_net=neural_net, process_queue=self.process_queue,
@@ -136,25 +141,14 @@ class GameTree:
                         # We have found a leaf move
                         move_has_child_node = False
 
-                    # If all nodes are awaiting processing... there is nowhere to expand so go back to the top
-                    if all([move.child_node and move.child_node.awaiting_processing and not move.child_node.branch_complete for move in current_node.moves]):
 
-                        # self.undo_informationless_rollout(visited_moves)
-                        #
-                        # current_node = self.root
-                        # visited_moves = []
+                    while self.multiprocess and all([move.child_node and move.child_node.awaiting_processing
+                                                    and not move.child_node.branch_complete
+                                                    for move in current_node.moves]) and not current_node.branch_complete:
+                        # BUG: empty list reutrns true! ... so when no moves wwe get stuck in a loop
+                        print(f"\rQueue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
+                        self.apply_neural_net_results()
 
-                        # Below check checks that we have not reached node in which all nodes are awaiting processing
-                        # This would mean we are seriously behind
-                        while self.multiprocess and all([move.child_node and move.child_node.awaiting_processing
-                                                        and not move.child_node.branch_complete
-                                                        for move in current_node.moves]) and not current_node.branch_complete:
-                            # BUG: empty list reutrns true! ... so when no moves wwe get stuck in a loop
-                            print(f"\rQueue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
-                            self.apply_neural_net_results()
-
-                        # # Go onto the next MCTS roll out to avoid getting stuck down here
-                        # break
 
                     # If the queue has become too fully than wait for it to process... get it down to batch size for the
                     # actual call to finish off
@@ -169,6 +163,9 @@ class GameTree:
 
                     if move is None:
                         break
+
+                    if all([move.child_node and move.child_node.branch_complete for move in current_node.moves]):
+                        current_node.branch_complete = True
 
                 if not current_node.branch_complete and move is not None and visited_moves:
                     # If the graph is complete its already been done
@@ -231,6 +228,8 @@ class GameTree:
 
         gamma_factor = 1
 
+        # This is the other player as player who made a the move into the new state is the opposite player to whos turn
+        # it is in the state
         player = visited_moves[-1].parent_node.player
 
         for idx, move in enumerate(reversed(visited_moves)):
@@ -262,10 +261,10 @@ class GameTree:
     def search_for_sufficiently_visited_nodes(self, root_node):
         def recursive_search(node, count):
 
-            self.save_results_to_memory(node, root_node)
-
             if node.branch_complete or count > 400:
                 return
+
+            self.save_results_to_memory(node, root_node)
 
             for move in node.moves:
                 if move.N >= 100 and move.child_node:
@@ -281,6 +280,8 @@ class GameTree:
         moves = [move.move for move in current_node.moves]
         visit_counts = [move.N for move in current_node.moves]
         predicted_value = current_node.V
+
+        self.saved_memory_local += 1
 
         if not self.multiprocess:
             self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, current_node is root_node)
@@ -444,7 +445,6 @@ class Node:
         move_N = np.array([move.N for move in self.moves])
         move_P = np.array([move.P for move in self.moves])
         move_Q = np.array([move.Q for move in self.moves])
-        move_virtual_loss = np.array([move.virtual_loss for move in self.moves])
         branch_complete = np.array([move.child_node.branch_complete if move.child_node is not None else False for move in self.moves])
 
         # Ignore completed branches
@@ -467,9 +467,16 @@ class Node:
         return self.moves[best_index]
 
     def select_new_root_node(self, tau: float = 1.0):
+
         Ns = np.array([move.N for move in self.moves])
+
         N_to_tau = np.power(Ns, 1./tau)
+
+        if np.all(Ns==0):
+            print('here')
+
         probs = N_to_tau / np.sum(N_to_tau)
+
         chosen_move = np.random.choice(self.moves, p=probs)
         return chosen_move.child_node, chosen_move.move
 
@@ -537,7 +544,7 @@ class Move:
         done, result_code = board.is_game_over()
 
         if done:
-            print("End game found!")
+            print("\rEnd game found!", end="")
             self.child_node.branch_complete = True
             if result_code == 1:
                 reward = 1.
