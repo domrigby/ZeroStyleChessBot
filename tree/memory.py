@@ -112,3 +112,7 @@ class Memory:
                 self.data.append(data_point)
             else:
                 self.data[idx] = data_point
+
+    def save_data(self):
+        with open('new_data.pkl', 'wb') as f:
+            pkl.dump(self.data, f)

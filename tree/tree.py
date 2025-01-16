@@ -10,6 +10,7 @@ except RuntimeError:
 import chess
 import numpy as np
 from numpy.random import default_rng
+from copy import copy
 import time
 
 # You need to build the C++ bit first
@@ -35,13 +36,15 @@ class GameTree:
     add_dirichlet_noise = False
     minimax_over_mean = True
 
-    def __init__(self, env, env_kwargs: dict = None, num_threads: int = 6,
+    agent_count = 0
+
+    def __init__(self, env, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                  neural_net = None, manager: Manager = None, training: bool =  False,
                  multiprocess: bool = False, num_evalators: int = 1):
 
-        if env_kwargs is None:
-            env_kwargs = {}
+        self.agent_id = copy(GameTree.agent_count)
+        GameTree.agent_count += 1
 
         # Create a set of game environments for each thread
         self.env = env
@@ -376,6 +379,8 @@ class Node:
     DEFAULT_EDGE_NUM = 24
     def __init__(self, board=None, parent_move=None, state=None):
 
+        self.branch_complete_reason = None
+
         if board is not None:
             # TODO: sort out move initialisation
             self.moves: List[Move] = []
@@ -416,6 +421,7 @@ class Node:
 
         # Check if we have fully searched the branch
         if self.number_legal_moves == 0:
+            self.branch_complete_reason = 'No legal moves found'
             self.branch_complete = True
         else:
             self.branch_complete = False
@@ -471,9 +477,6 @@ class Node:
         Ns = np.array([move.N for move in self.moves])
 
         N_to_tau = np.power(Ns, 1./tau)
-
-        if np.all(Ns==0):
-            print('here')
 
         probs = N_to_tau / np.sum(N_to_tau)
 
@@ -545,6 +548,7 @@ class Move:
 
         if done:
             print("\rEnd game found!", end="")
+            self.child_node.branch_complete_reason = f'End game found in sim: {result_code}'
             self.child_node.branch_complete = True
             if result_code == 1:
                 reward = 1.

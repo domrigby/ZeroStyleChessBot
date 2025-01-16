@@ -3,7 +3,6 @@ import chess.svg
 import chess_moves
 from tree.tree import GameTree
 import time
-import torch
 
 from neural_nets.conv_net import ChessNet
 
@@ -11,14 +10,12 @@ if __name__ == '__main__':
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=16)
 
-    # tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, training=True)
-
     tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, training=True, multiprocess=True)
 
     sims = 1000
     max_length = 400
 
-    for game in range(1000):
+    for game in range(1000000):
 
         move_count = 0
         main_board = chess.Board()
@@ -37,7 +34,7 @@ if __name__ == '__main__':
             tree.parallel_search(current_node=node,number_of_expansions=sims)
             end_time = time.time()
 
-            print(f"Time with parallel search {end_time-start_time:.3f}")
+            print(f"\n\nTime with parallel search {end_time-start_time:.3f}")
 
             #TODO: sort out now visiting
 
@@ -51,22 +48,11 @@ if __name__ == '__main__':
             chess_move = chess.Move.from_uci(move)
             main_board.push(chess_move)
 
-
             print(f"Game {game} Move: {move_count}")
+            print("Board:")
             print(main_board)
 
-            print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
-            print(f"Game over: {main_board.is_game_over()}")
-            print(f"Memory length: {tree.saved_memory_local} Process queue: {tree.process_queue.qsize()}")
-            print('\n')
-
-            tree.root = node
-
-            # Clear references to the tree above
-            tree.root.parent_move = None
-
-            # Increment move count
-            move_count += 1
+            print(f"FEN String: {main_board.fen()}")
 
             if main_board.is_checkmate():
                 print("Checkmate!")
@@ -77,11 +63,26 @@ if __name__ == '__main__':
                 print("Insufficient material to checkmate!")
             elif move_count >= max_length:
                 print("Maximum move length")
-            elif main_board.is_check():
-                print("King is in check!")
+            else:
 
-            if len(tree.root.moves) == 0:
-                print("Game over")
+                print(f"Move chosen: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
+                print(f"Game over: {main_board.is_game_over()}")
+                print(f"Memory length: {tree.saved_memory_local} Process queue: {tree.process_queue.qsize()}")
+                print(f"Tree node complete: {node.branch_complete} Reason: {node.branch_complete_reason}")
+
+                if main_board.is_check():
+                    print("King is in check!")
+
+                tree.root = node
+
+                # Clear references to the tree above
+                tree.root.parent_move = None
+
+                # Increment move count
+                move_count += 1
+
+            if tree.root.branch_complete:
+                break
 
         if winner == 'w':
             white_win = True

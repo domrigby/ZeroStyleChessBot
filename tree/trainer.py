@@ -53,6 +53,9 @@ class TrainingProcess(Process):
 
             self.train_neural_network()
 
+            if len(self.memory.data) % 1000 == 0:
+                self.memory.save_data()
+
     def train_neural_network(self):
         """ Train the neural network using the experiences from the memory """
         if len(self.memory) < 32:
