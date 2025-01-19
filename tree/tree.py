@@ -1,10 +1,10 @@
-import multiprocessing as mp
-
-try:
-   mp.set_start_method('spawn', force=True)
-   print("spawned")
-except RuntimeError:
-   pass
+# import multiprocessing as mp
+#
+# try:
+#    mp.set_start_method('spawn', force=True)
+#    print("spawned")
+# except RuntimeError:
+#    pass
 
 
 import chess
@@ -17,18 +17,16 @@ import time
 import chess_moves
 import torch
 
-from multiprocessing import Process, Manager, Queue, Lock
+from multiprocessing import Queue
 from queue import Empty
-import torch.multiprocessing as torch_mp
 
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Dict
 from line_profiler import profile
 
 from tree.memory import Memory
 from neural_nets.conv_net import ChessNet
 
 from tree.evaluator import NeuralNetHandling
-from tree.trainer import TrainingProcess
 
 
 class GameTree:
@@ -40,8 +38,9 @@ class GameTree:
 
     def __init__(self, env, num_threads: int = 6,
                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                 neural_net = None, manager: Manager = None, training: bool =  False,
-                 multiprocess: bool = False, num_evalators: int = 1):
+                 neural_net = None, training: bool =  False,
+                 multiprocess: bool = False, evaluator: NeuralNetHandling = None,
+                 experience_queue: Queue = None):
 
         self.agent_id = copy(GameTree.agent_count)
         GameTree.agent_count += 1
@@ -56,9 +55,6 @@ class GameTree:
         # Create the queues
         self.num_workers = num_threads
 
-        # Give this the manager object
-        self.manager = manager
-
         # Training switch
         self.training = training
         self.multiprocess = multiprocess
@@ -72,29 +68,15 @@ class GameTree:
             self.memory = Memory(100000)
         else:
 
-            # Create the queues
-            self.process_queue = Queue()
+            # Link the queues
+            self.process_queue = evaluator.process_queue
             self.process_queue_node_lookup: Dict[int, tuple] = {}
 
-            self.experience_queue = Queue()
+            self.experience_queue = experience_queue
             self.results_queue = Queue()
 
-            # Create the multiprocess queue
-            nn_update = torch_mp.Queue()
-
-            self.evaluators: List[NeuralNetHandling] = []
-
-            neural_net.share_memory()
-
-            for _ in range(num_evalators):
-                self.evaluators.append(NeuralNetHandling(neural_net=neural_net, process_queue=self.process_queue,
-                                                         results_queue=self.results_queue, nn_queue=nn_update,
-                                                         batch_size=128))
-
-            self.trainer = TrainingProcess(neural_net=neural_net, experience_queue=self.experience_queue, nn_queue=nn_update, batch_size=128)
-
-            [evaluator.start() for evaluator in self.evaluators]
-            self.trainer.start()
+            # Give reference to evaluator such that it can find it upon return
+            evaluator.set_results_queue(self.agent_id, self.results_queue)
 
     def reset(self):
         self.root = Node(self.env(), state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
@@ -105,7 +87,6 @@ class GameTree:
         if current_node is None:
             current_node = self.root
 
-        @profile
         def search_down_tree(env, thread_num_expansions: int, current_node, thread_num: int = 0, time_limit: float = 100.):
 
             # Sharaing a random number generator SEVERELY slows down the process... explainationn pending
@@ -194,7 +175,7 @@ class GameTree:
 
                             self.process_queue_node_lookup[node_hash] = (current_node, visited_moves)
 
-                            self.process_queue.put((node_hash, states, legal_moves))
+                            self.process_queue.put((self.agent_id, node_hash, states, legal_moves))
 
                             # Set the node is current node is awaiting processing
                             current_node.awaiting_processing = True
@@ -214,9 +195,10 @@ class GameTree:
 
             self.search_for_sufficiently_visited_nodes(self.root)
 
-        self.nodes = ThreadLocalNodePool(self.num_workers, number_of_expansions//self.num_workers)
+        # Prob need to get rid of this
+        self.nodes: List[Node] = []
         for _ in range(number_of_expansions):
-            self.nodes.put(Node())
+            self.nodes.append(Node())
 
         search_down_tree(self.env, number_of_expansions // self.num_workers, current_node, 0, time_limit=time_limit)
 
@@ -355,23 +337,90 @@ class GameTree:
     def end_game(self, white_win: bool):
         self.memory.end_game(white_win)
 
+    def train(self, n_games: int = 1000000):
 
-class ThreadLocalNodePool:
-    def __init__(self, num_threads, pool_size):
-        self.num_threads = num_threads
-        self.ctr = 0
-        self.local_pools = [Queue() for _ in range(num_threads)]
-        for pool in self.local_pools:
-            for _ in range(pool_size):
-                pool.put(Node())
+        game_count = 0
+        max_length = 300
+        sims = 1000
 
-    def get(self, thread_id):
-        return self.local_pools[thread_id].get()
+        while True:
 
-    def put(self, node):
-        thread = self.ctr % self.num_threads
-        self.ctr += 1
-        self.local_pools[thread].put(node)
+            # Start a new game
+
+            move_count = 0
+            main_board = chess.Board()
+
+            self.reset()
+
+            node = self.root
+            winner = None
+
+            while not main_board.is_game_over():
+
+                start_time = time.time()
+                self.parallel_search(current_node=node, number_of_expansions=sims)
+                end_time = time.time()
+
+                print(f"\n\nTime with parallel search {end_time - start_time:.3f}")
+
+                # TODO: sort out now visiting
+
+                if move_count < 30:
+                    tau = 1.
+                else:
+                    tau = 0.1
+
+                node, move = self.root.select_new_root_node(tau=tau)
+
+                chess_move = chess.Move.from_uci(move)
+                main_board.push(chess_move)
+
+                print(f"Agent {self.agent_id} Game {game_count} Move: {move_count}")
+                print("Board:")
+                print(main_board)
+
+                print(f"FEN String: {main_board.fen()}")
+
+                if main_board.is_checkmate():
+                    print("Checkmate!")
+                    winner = main_board.fen().split()[1]
+                elif main_board.is_stalemate():
+                    print("Stalemate!")
+                elif main_board.is_insufficient_material():
+                    print("Insufficient material to checkmate!")
+                elif move_count >= max_length:
+                    print("Maximum move length")
+                else:
+
+                    print(
+                        f"Move chosen: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
+                    print(f"Game over: {main_board.is_game_over()}")
+                    print(f"Memory length: {self.saved_memory_local} Process queue: {self.process_queue.qsize()}")
+                    print(f"Tree node complete: {node.branch_complete} Reason: {node.branch_complete_reason}")
+
+                    if main_board.is_check():
+                        print("King is in check!")
+
+                    self.root = node
+
+                    # Clear references to the tree above
+                    self.root.parent_move = None
+
+                    # Increment move count
+                    move_count += 1
+
+                if self.root.branch_complete:
+                    break
+
+            if winner == 'w':
+                white_win = True
+            elif winner == 'b':
+                white_win = False
+            else:
+                white_win = None
+
+            if not self.multiprocess:
+                self.end_game(white_win)
 
 
 class Node:
@@ -528,7 +577,7 @@ class Move:
         return str(self.move)
 
     @profile
-    def expand(self, board: chess.Board, state: str = None, node_queue: Queue = None, thread_num: int = 0):
+    def expand(self, board: chess.Board, state: str = None, node_queue: List[Node] = None, thread_num: int = 0):
 
         if state is None:
             state = board.fen()  # Update the board state to the provided FEN string
@@ -538,7 +587,7 @@ class Move:
 
         # Create a new child node
         if node_queue is not None:
-            self.child_node = node_queue.get(thread_num)
+            self.child_node = node_queue.pop(thread_num)
             self.child_node.re_init(new_state, board, parent_move=self)
         else:  # If no queue provided, create a new node directly
             self.child_node = Node(board, parent_move=self)
