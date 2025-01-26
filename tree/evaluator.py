@@ -1,30 +1,27 @@
 from multiprocessing import Process, Queue, Lock
 from queue import Empty
-import torch.multiprocessing as torch_mp
-
-from tree.memory import Memory
-import numpy as np
-import chess_moves
-
-import torch
-
+from typing import List, Dict
 from neural_nets.conv_net import ChessNet
+import numpy as np
 
 class NeuralNetHandling(Process):
-    """ This is meant constantly run the neural network evaluation and training in parallelwith MCTS"""
+    """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
 
     test_mode = False
 
-    def __init__(self, neural_net: ChessNet, process_queue, results_queue, nn_queue: torch_mp.Queue,
-                 batch_size: int = 64):
+    def __init__(self, neural_net: ChessNet, process_queues: List[Queue] = None,
+                 results_queue_dict: Dict[int, Queue] = None, batch_size: int = 64):
         """
         :param queue: queue from the tree search
         :param lock:
         """
         super().__init__()
-        self.process_queue = process_queue
-        self.results_queue = results_queue
-        self.nn_queue = nn_queue
+        self.process_queue = process_queues
+
+        if results_queue_dict:
+            self.results_queue = results_queue_dict
+        else:
+            self.results_queue = {}
 
         self.running = True
 
@@ -33,20 +30,38 @@ class NeuralNetHandling(Process):
         self.neural_net = neural_net
         self.processed_count = 0
 
-
     def run(self):
         # If there are states in the qy
 
+        if self.results_queue is None:
+            raise ValueError("NO RESULTS QUEUE: User must provide results queue from their game tree.")
+
         while self.running:
 
-            if not self.process_queue.empty():
-                hashes = []
-                states = []
-                legal_moves = []
+            agent_ids = []
+            hashes = []
+            states = []
+            legal_moves = []
 
-                for _ in range(min(self.process_queue.qsize(), self.batch_size)):
+            # Go through all the queues
+            queue_occupancy = np.array([queue.qsize() for queue in self.process_queue])
+
+            if np.sum(queue_occupancy) == 0:
+                # Skip rest of loop
+                continue
+
+            batch_size_allowance = np.round(self.batch_size * queue_occupancy / np.sum(queue_occupancy)).astype(int)
+
+            for idx, queue in enumerate(self.process_queue):
+
+                # Skip if empty
+                if queue.empty():
+                    continue
+
+                for _ in range(min(queue.qsize(), batch_size_allowance[idx])):
                     try:
-                        the_hash, state, legal_moves_strings= self.process_queue.get_nowait()
+                        agent_id, the_hash, state, legal_moves_strings= queue.get_nowait()
+                        agent_ids.append(agent_id)
                         hashes.append(the_hash)
                         states.append(state)
                         legal_moves.append(legal_moves_strings)
@@ -55,36 +70,32 @@ class NeuralNetHandling(Process):
                     except Empty:
                         break
 
-                if self.test_mode:
-                    self.test_mode_func(hashes, states, legal_moves)
-                    continue
+            if self.test_mode:
+                self.test_mode_func(hashes, states, legal_moves)
+                continue
 
-                # Check that items have actually been received
-                if len(hashes) > 0:
+            # Check that items have actually been received
+            if len(hashes) > 0:
 
-                    # Create the input tensors
-                    state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
+                # Create the input tensors
+                state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
 
-                    # Perform forward pass
-                    self.neural_net.eval()
-                    values, policies = self.neural_net(state_tens, legal_move_mask)
-                    self.neural_net.train()
+                # Perform forward pass
+                self.neural_net.eval()
+                values, policies = self.neural_net(state_tens, legal_move_mask)
+                self.neural_net.train()
 
-                    # Results will come in tuples of (node, value, [[edge, prob]])
-                    for idx, the_hash in enumerate(hashes):
+                # Results will come in tuples of (node, value, [[edge, prob]])
+                for idx, the_hash in enumerate(hashes):
 
-                        move_probs = []
-                        for edge, move_idx in legal_move_key[idx]:
-                            move_probs.append([edge, policies[idx][move_idx].item()])
+                    move_probs = []
+                    for edge, move_idx in legal_move_key[idx]:
+                        move_probs.append([edge, policies[idx][move_idx].item()])
 
-                        self.results_queue.put((the_hash, values[idx].item(), move_probs, legal_move_key[idx]))
+                    agent_id = agent_ids[idx]
 
-                if self.nn_queue.qsize() > 0:
-                    try:
-                        state_dict = self.nn_queue.get_nowait()
-                        self.neural_net.load_state_dict(state_dict)
-                    except Empty:
-                        pass
+                    # Located correct queue to send back
+                    self.results_queue[agent_id].put((the_hash, values[idx].item(), move_probs, legal_move_key[idx]))
 
 
     def test_mode_func(self, hashes, states, legal_moves):

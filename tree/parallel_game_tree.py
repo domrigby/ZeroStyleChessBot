@@ -1,59 +1,30 @@
-# import multiprocessing as mp
-#
-# try:
-#    mp.set_start_method('spawn', force=True)
-#    print("spawned")
-# except RuntimeError:
-#    pass
-
-
 import chess
 import numpy as np
 from numpy.random import default_rng
 from copy import copy
 import time
-
-# You need to build the C++ bit first
-import chess_moves
 import torch
-
-from multiprocessing import Queue
+from multiprocessing import Queue, Process
 from queue import Empty
-
-from typing import List, Optional, Dict
-from line_profiler import profile
-
+from typing import List, Dict
 from tree.memory import Memory
-from neural_nets.conv_net import ChessNet
+import chess_moves
+import multiprocessing as mp
 
-from tree.evaluator import NeuralNetHandling
-
-
-class GameTree:
+class GameTree(Process):
 
     add_dirichlet_noise = False
-    minimax_over_mean = True
 
     agent_count = 0
 
-    def __init__(self, env, num_threads: int = 6,
-                 start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                 neural_net = None, training: bool =  False,
-                 multiprocess: bool = False, evaluator: NeuralNetHandling = None,
-                 experience_queue: Queue = None):
+    def __init__(self, neural_net = None, training: bool =  False,
+                 multiprocess: bool = False, process_queue: Queue = None,
+                 experience_queue: Queue = None, results_queue: Queue = None):
+
+        super().__init__()
 
         self.agent_id = copy(GameTree.agent_count)
         GameTree.agent_count += 1
-
-        # Create a set of game environments for each thread
-        self.env = env
-
-        # Create the root node of the tree
-        self.root = Node(self.env(), state=start_state)
-        self.nodes: List[Node] = []
-
-        # Create the queues
-        self.num_workers = num_threads
 
         # Training switch
         self.training = training
@@ -67,140 +38,119 @@ class GameTree:
             self.neural_net = neural_net
             self.memory = Memory(100000)
         else:
-
             # Link the queues
-            self.process_queue = evaluator.process_queue
+            self.process_queue = process_queue
             self.process_queue_node_lookup: Dict[int, tuple] = {}
 
             self.experience_queue = experience_queue
-            self.results_queue = Queue()
-
-            # Give reference to evaluator such that it can find it upon return
-            evaluator.set_results_queue(self.agent_id, self.results_queue)
+            self.results_queue = results_queue
 
     def reset(self):
-        self.root = Node(self.env(), state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-        self.nodes = []
+        self.root = Node(state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", board=chess_moves.ChessEngine())
 
     def parallel_search(self, current_node = None, number_of_expansions: int = 1000, time_limit: float = 100.):
 
         if current_node is None:
             current_node = self.root
 
-        def search_down_tree(env, thread_num_expansions: int, current_node, thread_num: int = 0, time_limit: float = 100.):
+        # Sharaing a random number generator SEVERELY slows down the process... explainationn pending
+        thread_rng = default_rng()
 
-            # Sharaing a random number generator SEVERELY slows down the process... explainationn pending
-            thread_rng = default_rng()
+        # Initialise the threads env
+        thread_env = chess_moves.ChessEngine()
 
-            # Initialise the threads env
-            thread_env = env()
-            start_time = time.time()
+        for idx in range(number_of_expansions):
 
-            for idx in range(thread_num_expansions):
+            # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
+            visited_moves: List[Move] = []
+            move_has_child_node = True
 
-                # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
-                visited_moves: List[Move] = []
-                move_has_child_node = True
+            # Expand to leaf
+            while move_has_child_node and not current_node.branch_complete:
 
-                # Expand to leaf
-                while move_has_child_node and not current_node.branch_complete:
+                # Select
+                move = current_node.puct(rng_generator=thread_rng)
+                visited_moves.append(move)
 
-                    # Select
-                    move = current_node.puct(rng_generator=thread_rng)
-                    visited_moves.append(move)
+                # Statistics
+                move.N += 1
 
-                    # Statistics
-                    move.N += 1
+                # Set virtual loss to discourage search down here for a bit
+                if self.multiprocess:
+                    move.virtual_loss -= 1.
 
-                    # Set virtual loss to discourage search down here for a bit
-                    if self.multiprocess:
-                        move.virtual_loss -= 1.
+                if move.child_node:
 
-                    if move.child_node:
+                    # Get new node and then a new move
+                    current_node = move.child_node
 
-                        # Get new node and then a new move
-                        current_node = move.child_node
-
-                    else:
-                        # We have found a leaf move
-                        move_has_child_node = False
+                else:
+                    # We have found a leaf move
+                    move_has_child_node = False
 
 
-                    while self.multiprocess and all([move.child_node and move.child_node.awaiting_processing
-                                                    and not move.child_node.branch_complete
-                                                    for move in current_node.moves]) and not current_node.branch_complete:
-                        # BUG: empty list reutrns true! ... so when no moves wwe get stuck in a loop
-                        print(f"\rQueue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
-                        self.apply_neural_net_results()
+                while self.multiprocess and all([move.child_node and move.child_node.awaiting_processing
+                                                and not move.child_node.branch_complete
+                                                for move in current_node.moves]) and not current_node.branch_complete:
+                    # BUG: empty list reutrns true! ... so when no moves wwe get stuck in a loop
+                    print(f"\rQueue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
+                    self.apply_neural_net_results()
 
 
-                    # If the queue has become too fully than wait for it to process... get it down to batch size for the
-                    # actual call to finish off
-                    while self.multiprocess and self.process_queue.qsize() > 128:
-                        self.apply_neural_net_results()
+                # If the queue has become too fully than wait for it to process... get it down to batch size for the
+                # actual call to finish off
+                while self.multiprocess and self.process_queue.qsize() > 128:
+                    self.apply_neural_net_results()
 
-                    if not self.multiprocess and self.training and idx % 30 == 0:
-                        self.train_neural_network_local()
+                if not self.multiprocess and self.training and idx % 30 == 0:
+                    self.train_neural_network_local()
 
-                    if self.multiprocess:
-                        self.apply_neural_net_results()
+                if self.multiprocess:
+                    self.apply_neural_net_results()
 
-                    if move is None:
-                        break
-
-                    if all([move.child_node and move.child_node.branch_complete for move in current_node.moves]):
-                        current_node.branch_complete = True
-
-                if not current_node.branch_complete and move is not None and visited_moves:
-                    # If the graph is complete its already been done
-
-                    current_node, reward, done = move.expand(thread_env, state=current_node.state, node_queue=self.nodes, thread_num=thread_num)
-
-                    if not self.multiprocess:
-                        value = self.neural_net.node_evaluation(current_node)
-                        current_node.V = value
-                        reward += value
-                        reward /= 2
-                        self.backpropagation(visited_moves, reward)
-
-                    else:
-
-                        # Create a hash of the node such that we can relocate this node later
-                        node_hash = hash(current_node)
-
-                        if node_hash not in self.process_queue_node_lookup:
-
-                            states = current_node.state
-                            legal_moves = current_node.legal_move_strings
-
-                            self.process_queue_node_lookup[node_hash] = (current_node, visited_moves)
-
-                            self.process_queue.put((self.agent_id, node_hash, states, legal_moves))
-
-                            # Set the node is current node is awaiting processing
-                            current_node.awaiting_processing = True
-
-                        else:
-                            # TODO: handle these better
-                            self.undo_informationless_rollout(visited_moves)
-
-                # Now return to root node
-                current_node = self.root
-
-                # Final check on time limit
-                time_now = time.time()
-                if time_now - start_time > time_limit:
-                    print('Time limit exceeded. Returning.')
+                if move is None:
                     break
 
-            self.search_for_sufficiently_visited_nodes(self.root)
+                if all([move.child_node and move.child_node.branch_complete for move in current_node.moves]):
+                    current_node.branch_complete = True
 
-        # Prob need to get rid of this
-        self.nodes: List[Node] = []
-        for _ in range(number_of_expansions):
-            self.nodes.append(Node())
+            if not current_node.branch_complete and move is not None and visited_moves:
+                # If the graph is complete its already been done
 
-        search_down_tree(self.env, number_of_expansions // self.num_workers, current_node, 0, time_limit=time_limit)
+                current_node, reward, done = move.expand(thread_env, state=current_node.state)
+
+                if not self.multiprocess:
+                    value = self.neural_net.node_evaluation(current_node)
+                    current_node.V = value
+                    reward += value
+                    reward /= 2
+                    self.backpropagation(visited_moves, reward)
+
+                else:
+
+                    # Create a hash of the node such that we can relocate this node later
+                    node_hash = hash(current_node)
+
+                    if node_hash not in self.process_queue_node_lookup:
+
+                        states = current_node.state
+                        legal_moves = current_node.legal_move_strings
+
+                        self.process_queue_node_lookup[node_hash] = (current_node, visited_moves)
+
+                        self.process_queue.put((self.agent_id, node_hash, states, legal_moves))
+
+                        # Set the node is current node is awaiting processing
+                        current_node.awaiting_processing = True
+
+                    else:
+                        # TODO: handle these better
+                        self.undo_informationless_rollout(visited_moves)
+
+            # Now return to root node
+            current_node = self.root
+
+        self.search_for_sufficiently_visited_nodes(self.root)
 
     @staticmethod
     def undo_informationless_rollout(visited_moves):
@@ -235,13 +185,6 @@ class GameTree:
 
             if self.multiprocess:
                 move.virtual_loss += 1
-
-            # We have just expanded the tree and found a new state and got a new value for it
-            # Game theory logic:
-            #   If it was expanded to be this players turn... previous moves now have this value if it is higher than
-            #   the previous Qs (they will choose to pursue this game state
-            #   If it is not this player
-
 
     def search_for_sufficiently_visited_nodes(self, root_node):
         def recursive_search(node, count):
@@ -337,6 +280,9 @@ class GameTree:
     def end_game(self, white_win: bool):
         self.memory.end_game(white_win)
 
+    def run(self):
+        self.train()
+
     def train(self, n_games: int = 1000000):
 
         game_count = 0
@@ -370,7 +316,7 @@ class GameTree:
                 else:
                     tau = 0.1
 
-                node, move = self.root.select_new_root_node(tau=tau)
+                node, move = self.root.exploratory_select_new_root_node(tau=tau)
 
                 chess_move = chess.Move.from_uci(move)
                 main_board.push(chess_move)
@@ -425,47 +371,18 @@ class GameTree:
 
 class Node:
 
-    DEFAULT_EDGE_NUM = 24
-    def __init__(self, board=None, parent_move=None, state=None):
+    def __init__(self, state: str , board: chess_moves.ChessEngine =None, parent_move =None):
 
-        self.branch_complete_reason = None
+        # The chess fen string object representing this state
+        self.state: str = state
+        self.player: str = self.state.split()[1]
 
-        if board is not None:
-            # TODO: sort out move initialisation
-            self.moves: List[Move] = []
-            self.re_init(state, board, parent_move)
-        else:
-            # Initialise empty forms of the class
-            self.state: Optional[str] = None  # The chess fen string object representing this state
-            self.parent_move: Optional[Move] = None
-            self.player: Optional[str] = None
-
-            self.number_legal_moves: int = 0
-            self.branch_complete: bool = False  # Flag to indicate if the branch has been fully searched
-
-            self.moves: List[Move] = [Move() for _ in range(self.DEFAULT_EDGE_NUM)]
-            self.branch_complete = False
-
-            self.has_policy: bool = False
-            self.team: Optional[str] = None
-
-            # State value
-            self.V: float = 0
-
-            # Set a flag saying it has not been processed yet
-            self.awaiting_processing: bool = False
-
-    def re_init(self, state:str, board, parent_move=None):
-
-        self.state = state  # The chess fen string object representing this state
-        self.player = self.state.split()[1]
-        assert self.player in ['w', 'b'], ValueError('Player must be w or b')
-
+        # Save a reference to the parent node
         self.parent_move = parent_move  # Reference to the parent move
 
+        # Generate child nodes for legal moves
         board.set_fen(self.state)
         legal_moves =  board.legal_moves()
-
         self.number_legal_moves = len(list(legal_moves))
 
         # Check if we have fully searched the branch
@@ -475,22 +392,25 @@ class Node:
         else:
             self.branch_complete = False
 
+        # Create edges
+        self.moves: List[Move] = []
         created_move_num = len(self.moves)
         for idx, move in enumerate(legal_moves):
-            if idx < created_move_num:
-                self.moves[idx].re_init(self, move)
-            else:
-                self.moves.append(Move(self, move))
+            self.moves.append(Move(self, move))
 
         if self.number_legal_moves < len(self.moves):
             # Get rid of excess moves
             self.moves = self.moves[:self.number_legal_moves]
 
-        self.has_policy = False
+        # Save whos go it is
         self.team = "white" if self.state.split()[1] == 'w' else "black"
 
         # State value
         self.V = 0
+
+        # Set a flag saying it has not been processed yet
+        self.branch_complete_reason: str = None
+        self.awaiting_processing: bool = False
 
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
         """
@@ -521,18 +441,23 @@ class Node:
 
         return self.moves[best_index]
 
-    def select_new_root_node(self, tau: float = 1.0):
-
+    def exploratory_select_new_root_node(self, tau: float = 1.0):
+        """
+        Select a random child node with a temperature adjusted probability distribution
+        :param tau:
+        :return:
+        """
         Ns = np.array([move.N for move in self.moves])
-
         N_to_tau = np.power(Ns, 1./tau)
-
         probs = N_to_tau / np.sum(N_to_tau)
-
         chosen_move = np.random.choice(self.moves, p=probs)
         return chosen_move.child_node, chosen_move.move
 
     def greedy_select_new_root_node(self):
+        """
+        Select child node with the highest Q
+        :return:
+        """
         Qs = np.array([move.Q for move in self.moves])
         illegit_moves = [True if move.N > 0 else False for move in self.moves]
         Qs[illegit_moves] = -np.inf
@@ -547,13 +472,10 @@ class Node:
 
 class Move:
 
-    def __init__(self, parent_node: Node = None, move=None):
+    def __init__(self, parent_node: Node, move: str):
 
-        if parent_node is not None and move is not None:
-            self.re_init(parent_node, move)
-        else:
-            self.parent_node: Node = None
-            self.move = None
+        self.parent_node = parent_node
+        self.move = move
 
         self.child_node = None
 
@@ -569,15 +491,10 @@ class Move:
         # Multi-processing variables
         self.virtual_loss = 0
 
-    def re_init(self, parent_node, move):
-        self.parent_node = parent_node
-        self.move = move
-
     def __str__(self):
         return str(self.move)
 
-    @profile
-    def expand(self, board: chess.Board, state: str = None, node_queue: List[Node] = None, thread_num: int = 0):
+    def expand(self, board: chess.Board, state: str):
 
         if state is None:
             state = board.fen()  # Update the board state to the provided FEN string
@@ -586,11 +503,7 @@ class Move:
         new_state = board.push(state, str(self.move))
 
         # Create a new child node
-        if node_queue is not None:
-            self.child_node = node_queue.pop(thread_num)
-            self.child_node.re_init(new_state, board, parent_move=self)
-        else:  # If no queue provided, create a new node directly
-            self.child_node = Node(board, parent_move=self)
+        self.child_node = Node(new_state, board, parent_move=self)
 
         # Calculate the reward
         done, result_code = board.is_game_over()
@@ -606,8 +519,7 @@ class Move:
         else:
             reward = 0.
 
-        # Update statistics
-
+        # Update statistic
         return self.child_node, reward, done
 
     @property
@@ -615,28 +527,3 @@ class Move:
         # Virtual loss is the equivalent of
         Q =  (self.W + self.virtual_loss) / self.N if self.N > 0 else torch.tensor(0)
         return Q
-
-#
-if __name__ == '__main__':
-
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[66, 8, 8], num_repeats=16)
-    chess_net.load_network(r"/home/dom/Code/chess_bot/neural_nets/session/best_model_120.pt")
-    chess_net.eval()
-
-    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net)
-
-    sims = 25000
-
-    import time
-    start_time = time.time()
-    for i in range(10):
-        tree.parallel_search(number_of_expansions=sims)
-    end_time = time.time()
-
-    print(f"Time with parallel search {end_time-start_time:.3f}")
-    print(sum([move.N for move in tree.root.moves]))
-
-    best_moves = sorted(tree.root.moves, key= lambda x: x.Q, reverse=True)
-
-    # Create the root of the tree
-    initial_board = chess.Board()
