@@ -14,7 +14,7 @@ if __name__ == "__main__":
 
     NUM_EVALUATORS = 1
     NUM_TRAINERS = 1
-    NUM_AGENTS = 2
+    NUM_AGENTS = 1
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=16)
     chess_net.share_memory()

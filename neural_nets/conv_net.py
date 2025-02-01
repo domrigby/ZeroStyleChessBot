@@ -6,8 +6,7 @@ from typing import List
 
 class ChessNet(GenericNet):
 
-    def __init__(self, *args, num_filters: int = 64, num_repeats: int= 6,
-                 **kwargs):
+    def __init__(self, *args, num_filters: int = 64, num_repeats: int= 6, **kwargs):
 
         # Control convolution parameters
         self.num_filters = num_filters
@@ -90,6 +89,7 @@ class ChessNet(GenericNet):
         total_loss = value_loss + policy_loss
 
         # Step the weights
+        self.optimiser.zero_grad()
         total_loss.backward()
         self.optimiser.step()
 

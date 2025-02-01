@@ -14,8 +14,7 @@ from typing import List
 from neural_nets.conv_net import ChessNet
 
 class ChessDataset(Dataset):
-    def __init__(self, csv_paths=None, pgn_paths=None, pickle_file=None, sample_size: int= 100000,
-                 accepted_win_types: List[str] = None, rejected_win_types: List[str] = None):
+    def __init__(self, moves_dir: str, accepted_win_types: List[str] = None, rejected_win_types: List[str] = None):
         """
         Initialize the dataset with data from multiple CSV and PGN files.
         """
@@ -26,158 +25,38 @@ class ChessDataset(Dataset):
         self.accepted_win_types = accepted_win_types
         self.rejected_win_types = rejected_win_types
 
-        # Load data from multiple CSV files if provided
-        if csv_paths:
-            for csv_path in csv_paths:
-                self.load_csv(csv_path)
+        self.move_dirs = glob.glob(moves_dir + '/*')
 
-        # Load data from multiple PGN files if provided
-        if pgn_paths:
-            for pgn_path in pgn_paths:
-                self.load_pgn(pgn_path)
-
-        if csv_paths or pgn_paths:
-            # Save self.games to a file
-            with open("neural_nets/data/games.pkl", "wb") as f:
-                pickle.dump(self.games, f)
-
-        if pickle_file:
-           self.load_pickled_file(sample_size=sample_size)
-
-    def load_pickled_file(self, path: str = "neural_nets/data/games.pkl", sample_size: int = None):
-        with open(path, "rb") as f:
-            loaded_games = pickle.load(f)
-            if sample_size:
-                loaded_games = np.random.choice(loaded_games, sample_size)
-            self.games = loaded_games
-
-    def load_random_file(self, dir: str = "/home/dom/Code/chess_bot/neural_nets/data/pickles/shuffled_chunks", sample_size: int = 100000):
-
-        # Get all pickle files in the directory
-        files = glob.glob(dir + "/*.pkl")
-        self.games = []
-
-        num_games = 5
-        ind_sample_size = sample_size// 5
-
-        # Load games from pickle
-        for _ in range(num_games):
-            with open(np.random.choice(files), "rb") as f:
-                new_games = pickle.load(f)
-                new_games = np.random.choice(new_games, min(len(new_games), ind_sample_size))
-                self.games.extend(new_games)
-
-
-    def load_csv(self, csv_path):
-        """
-        Load game data from a CSV file.
-        """
-        self.games = []
-        csv_data = pd.read_csv(csv_path)
-        print(f"Loading {csv_path}")
-        counter = 0
-        for _, row in csv_data.iterrows():
-            moves = row['moves'].split()
-            if len(moves) < 5:
-                continue  # Skip games with no moves
-            winner = row['winner']
-            self.save_game_to_pkl(moves, winner)
-            counter += 1
-
-        file_name_with_ext = os.path.basename(csv_path)
-        file_name, _ = os.path.splitext(file_name_with_ext)
-        path = os.path.join("/home/dom/Code/chess_bot/neural_nets/data/pickles", file_name + '.pkl')
-
-        # Save a pickle of the file
-        with open(path, "wb") as f:
-            pickle.dump(self.games, f)
-
-    def load_pgn(self, pgn_path):
-        """
-        Load game data from a PGN file.
-        """
-        self.games = []
-
-        with open(pgn_path, 'r') as pgn_file:
-            print(f"Loading {pgn_path}")
-            while True:
-                game = chess.pgn.read_game(pgn_file)
-                if game is None:
-                    break
-                # Extract moves and winner
-                moves = [move.uci() for move in game.mainline_moves()]
-
-                winner = game.headers.get("Result", "*")
-                game_win_type = game.headers.get("Termination", "*")
-
-                for win_type in self.rejected_win_types:
-                    if win_type in game_win_type:
-                        continue
-
-                if winner == "1-0":
-                    winner = "white"
-                elif winner == "0-1":
-                    winner = "black"
-                else:
-                    winner = "draw"
-
-                self.save_game_to_pkl(moves, winner)
-
-        file_name_with_ext = os.path.basename(pgn_path)
-        file_name, _ = os.path.splitext(file_name_with_ext)
-        path = os.path.join("/home/dom/Code/chess_bot/neural_nets/data/pickles", file_name + '.pkl')
-
-        # Save a pickle of the file
-        with open(path, "wb") as f:
-            pickle.dump(self.games, f)
-
-    def save_game_to_pkl(self, moves, winner):
-        """
-        Precompute FEN states and moves for a single game and add to the dataset.
-        """
-        board = chess.Board()
-
-        if len(moves) < 5:
-            # Skip this game
-            return
-
-        for idx, move in enumerate(moves):
-
-            fen = board.fen()
-
+        self.all_moves: List[str] = []  # List of all pickle files containing precomputed FEN states and moves
+        for dir in self.move_dirs:
+            move_num = os.path.basename(dir)
             try:
+                if int(move_num) > 75:
+                    self.all_moves = self.all_moves + glob.glob(dir + '/*.pkl')
+            except ValueError:
+                print(f"{move_num} was skipped as it could not be converted to an int")
 
-                move = board.parse_san(move)
+        # self.all_moves = np.random.choice(self.all_moves, 100000)
 
-                # Get legal moves for the current FEN state
-                legal_moves = board.legal_moves
-                legal_moves = [str(move) for move in legal_moves if len(str(move)) < 5]
 
-                # Update the board for the next move
-                board.push(move)
-
-                if len(legal_moves) == 0:
-                    print(f"Game state {fen} with no legal moves.")
-                    continue
-
-                self.games.append({'fen': fen, 'move': str(move), 'legal_moves': legal_moves, 'winner': winner, 'turn_num': idx})
-
-            except Exception as e:
-                # Skip invalid moves
-                print(f"Invalid move: {move} due to {e}")
-                break
+        print(f"Dataset built with {len(self.all_moves)} moves.")
 
     def __len__(self):
         """
         Return the number of games.
         """
-        return len(self.games)
+        return len(self.all_moves)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         """
         Get a precomputed FEN state and move for a game.
         """
-        data = self.games[idx]
+
+        pkl_path = self.all_moves[idx]
+
+        with open(pkl_path, 'rb') as f:
+            data = pickle.load(f)
+
         fen = data['fen']
         move = data['move']
 
@@ -190,6 +69,8 @@ class ChessDataset(Dataset):
             result = 0
         else:
             result = -1
+
+        value = data['value']
 
         # Convert FEN state and move to tensors
         board_tensor = self.chess_engine.fen_to_tensor(fen)
@@ -218,37 +99,18 @@ class ChessDataset(Dataset):
             'move': move_tensor,
             'player': player,
             'result': result,
-            'mask': legal_move_mask
+            'mask': legal_move_mask,
+            'value': value
         }
 
 if __name__ == '__main__':
     # Example Usage
-    # Provide lists of paths to your CSV and PGN files
-    csv_paths = [] #[r"/home/dom/Code/chess_bot/neural_nets/data/games.csv"]  # Replace with your CSV file paths
-    pgn_paths =  [] #["/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-black.pgn" ,
-    #              "/home/dom/Code/chess_bot/neural_nets/data/MagnusCarlsen-white.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-black.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/chesstianchessington-white.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/robertpechacek-white.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/Vepkhvebi-white.pgn"]  # Replace with your PGN file paths
-    # pgn_paths = ["/home/dom/Code/chess_bot/neural_nets/data/GothamChess-black.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/GothamChess-white.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/daniel1966_1-black.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/wuy21-black.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/wuy21-white.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/JonasEilenberg-black.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/JonasEilenberg-white.pgn",
-    #              "/home/dom/Code/chess_bot/neural_nets/data/vanyakuba-black.pgn"]
 
-    # Initialize dataset with multiple CSV and PGN files
     batch_size = 32
-    chess_dataset = ChessDataset(csv_paths=csv_paths, pgn_paths=pgn_paths, rejected_win_types=['time']) #pickle_file='data/game.pkl')
+    chess_dataset = ChessDataset(moves_dir=r'/home/dom/Code/chess_bot/neural_nets/data/real_moves')
 
     idx = 0
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=16, init_lr=0.0001
-                         )
-
-    import matplotlib.pyplot as plt
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.0001)
 
     import matplotlib.pyplot as plt
     import os
@@ -297,21 +159,21 @@ if __name__ == '__main__':
 
     # Training parameters
     best_rolling_avg = float('inf')  # Initialize best rolling average
-    rolling_window = 1000
+    rolling_window = 100
     batch_counter = 0
 
     # Training loop
     for epoch in range(10000):
-        chess_dataset.load_random_file()
-        dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
 
-        print(f"Data points: {len(chess_dataset.games)} Batches: {len(chess_dataset.games) // batch_size}")
+        dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+
+        print(f"Data points: {len(chess_dataset.all_moves)} Batches: {len(chess_dataset.all_moves) // batch_size}")
 
         for batch in dataloader:
             state_tensor = batch['state']
             move_target_tensor = batch['move']
             player = batch['player']
-            value_target = batch['result']
+            value_target = batch['value']
 
             # Calculate loss
             loss, value_loss, policy_loss = chess_net.loss_function(

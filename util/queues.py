@@ -4,21 +4,23 @@ from tree.parallel_game_tree import GameTree
 from tree.evaluator import NeuralNetHandling
 from tree.trainer import TrainingProcess
 
-def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, network):
+def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, network,
+                  training: bool = True):
     """
-
-    :param num_agents:
-    :param num_evaluators:
-    :param num_trainers:
-    :param network:
+    This function initialises all the agents and strings and distributes the queues accordingly
+    :param num_agents: number of agents
+    :param num_evaluators: number of evaluators
+    :param num_trainers: number of trainers
+    :param network: the neural network being used
     :return:
     """
     agents_per_evaluator = num_agents / num_evaluators
-    agents_per_trainer = num_agents / num_trainers
+
+    if num_trainers:
+        agents_per_trainer = num_agents / num_trainers
 
     # Start initializing stuff
     agents: List[GameTree] = []
-    training_queues: List[Queue] = []
     results_queue_dicts: Dict[int, Queue] = {}
     process_queues: List[List[Queue]] = [[] for _ in range(num_evaluators)]
     training_queues: List[List[Queue]] = [[] for _ in range(num_trainers)]
@@ -27,12 +29,16 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
 
         process_queue = Queue()
         results_queue = Queue()
-        training_queue = Queue()
 
         process_queues[int(idx//agents_per_evaluator)].append(process_queue)
-        training_queues[int(idx//agents_per_trainer)].append(training_queue)
 
-        agent = GameTree(training=True, multiprocess=True, process_queue=process_queue, experience_queue=training_queue,
+        if num_trainers:
+            training_queue = Queue()
+            training_queues[int(idx//agents_per_trainer)].append(training_queue)
+        else:
+            training_queue = None
+
+        agent = GameTree(training=training, multiprocess=True, process_queue=process_queue, experience_queue=training_queue,
                          results_queue=results_queue)
 
         agents.append(agent)

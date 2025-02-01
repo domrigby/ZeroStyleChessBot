@@ -1,7 +1,20 @@
+import multiprocessing as mp
+if __name__ == "__main__":
+    try:
+       mp.set_start_method('spawn', force=True)
+       print("spawned")
+    except RuntimeError:
+        print("Failed to spawn")
+        pass
+
 import chess
 import chess.svg
 import chess_moves
-from tree.tree import GameTree
+from tree.parallel_game_tree import GameTree
+from tree.evaluator import NeuralNetHandling
+from util.queues import create_agents
+
+from multiprocessing import Queue
 
 
 from neural_nets.conv_net import ChessNet
@@ -9,19 +22,25 @@ from neural_nets.conv_net import ChessNet
 if __name__ == '__main__':
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=16)
-    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_127.pt")
+    chess_net.load_network(r"networks/network_331000.pt")
     chess_net.eval()
 
-    tree = GameTree(chess_moves.ChessEngine, num_threads=1, neural_net=chess_net, multiprocess=True)
+    tree, evaluator, _ = create_agents(1, 1, 0, chess_net, training=False)
 
     sims = 1000
 
+    tree = tree[0]
+
     node = tree.root
+
+    evaluator[0].start()
 
     main_board = chess.Board()
 
     import time
     ctr = 0
+
+    tree.reset()
 
     while not main_board.is_game_over():
         start_time = time.time()
@@ -51,7 +70,8 @@ if __name__ == '__main__':
         with open(f"save_game/move_{ctr}.svg", "w") as file:
             file.write(svg)
 
-        print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
+        if node:
+            print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
         print(f"Game over: {main_board.is_game_over()}")
         print('\n')
         tree.root = node

@@ -45,6 +45,9 @@ class GameTree(Process):
             self.experience_queue = experience_queue
             self.results_queue = results_queue
 
+        # Initiate root
+        self.root = None
+
     def reset(self):
         self.root = Node(state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", board=chess_moves.ChessEngine())
 
@@ -53,7 +56,7 @@ class GameTree(Process):
         if current_node is None:
             current_node = self.root
 
-        # Sharaing a random number generator SEVERELY slows down the process... explainationn pending
+        # Sharing a random number generator SEVERELY slows down the process... explainationn pending
         thread_rng = default_rng()
 
         # Initialise the threads env
@@ -88,14 +91,13 @@ class GameTree(Process):
                     # We have found a leaf move
                     move_has_child_node = False
 
-
+                # Check for bottleneck conditions
                 while self.multiprocess and all([move.child_node and move.child_node.awaiting_processing
                                                 and not move.child_node.branch_complete
                                                 for move in current_node.moves]) and not current_node.branch_complete:
-                    # BUG: empty list reutrns true! ... so when no moves wwe get stuck in a loop
-                    print(f"\rQueue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
+                    print(f"\rBOTTLENECK WARNING: Queue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
+                    # Clear the queue
                     self.apply_neural_net_results()
-
 
                 # If the queue has become too fully than wait for it to process... get it down to batch size for the
                 # actual call to finish off
@@ -150,7 +152,8 @@ class GameTree(Process):
             # Now return to root node
             current_node = self.root
 
-        self.search_for_sufficiently_visited_nodes(self.root)
+        if self.training:
+            self.search_for_sufficiently_visited_nodes(self.root)
 
     @staticmethod
     def undo_informationless_rollout(visited_moves):
