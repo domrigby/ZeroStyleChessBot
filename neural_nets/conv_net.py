@@ -38,17 +38,17 @@ class ChessNet(GenericNet):
 
         self.value_head = nn.Sequential(nn.Conv2d(self.num_filters, self.num_filters, kernel_size=3, padding=1),
                                      nn.LeakyReLU(),
-                                     nn.Conv2d(self.num_filters, 1, kernel_size=1, padding=1),
+                                     nn.Conv2d(self.num_filters, 4, kernel_size=3, padding=1),
                                      nn.LeakyReLU(),
                                      nn.Flatten(),
-                                     nn.Linear(100, 256),
+                                     nn.Linear(4*64, 256),
                                      nn.LeakyReLU(),
                                      nn.BatchNorm1d(256),
                                      nn.Linear(256, 1),
                                      nn.Tanh())
 
     @check_input
-    def forward(self, x: torch.tensor, legal_move_mask: torch.tensor = None):
+    def forward(self, x: torch.tensor, legal_move_mask: torch.tensor = None, infering: bool = False):
 
         x = self.input_conv(x)
         x = self.bn1(x)
@@ -65,22 +65,27 @@ class ChessNet(GenericNet):
 
         policy = policy.view(policy.size(0), -1)
 
-        policy = torch.nn.functional.softmax(policy, dim=1)
+        if infering:
+            policy = torch.nn.functional.softmax(policy, dim=1)
 
         policy = policy.view(size_pre_flat)
 
-        if legal_move_mask is not None:
+        if infering and legal_move_mask is not None:
+
             policy = torch.where(legal_move_mask == 1, policy, 0)
 
         return value, policy
 
-    def loss_function(self, input: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None):
+    def loss_function(self, input: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None, training: bool = True):
 
         target_value, target_policy = target
         target_value, target_policy = target_value.to(self.device), target_policy.to(self.device)
 
         # Predicted value
         predicted_value, predicted_policy = self(input, legal_move_mask)
+
+        if target_value.ndim == 1:
+            target_value = target_value.unsqueeze(-1)
 
         # Calculate losses
         value_loss = self.value_loss(predicted_value, target_value)
@@ -89,9 +94,11 @@ class ChessNet(GenericNet):
         total_loss = value_loss + policy_loss
 
         # Step the weights
-        self.optimiser.zero_grad()
-        total_loss.backward()
-        self.optimiser.step()
+        if training:
+            self.optimiser.zero_grad()
+            total_loss.backward()
+            self.optimiser.step()
+
 
         return total_loss, value_loss, policy_loss
 

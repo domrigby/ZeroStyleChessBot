@@ -21,8 +21,9 @@ from neural_nets.conv_net import ChessNet
 
 if __name__ == '__main__':
 
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=16)
-    chess_net.load_network(r"networks/network_331000.pt")
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
+    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/RL_tuned_230000.pt")
+    # chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model2_23.pt")
     chess_net.eval()
 
     tree, evaluator, _ = create_agents(1, 1, 0, chess_net, training=False)
@@ -74,6 +75,7 @@ if __name__ == '__main__':
             print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
         print(f"Game over: {main_board.is_game_over()}")
         print('\n')
+
         tree.root = node
         tree.root.parent_move = None
 

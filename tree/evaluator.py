@@ -82,7 +82,7 @@ class NeuralNetHandling(Process):
 
                 # Perform forward pass
                 self.neural_net.eval()
-                values, policies = self.neural_net(state_tens, legal_move_mask)
+                values, policies = self.neural_net(state_tens, legal_move_mask, infering=True)
                 self.neural_net.train()
 
                 # Results will come in tuples of (node, value, [[edge, prob]])
