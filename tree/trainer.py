@@ -12,7 +12,7 @@ from neural_nets.conv_net import ChessNet
 class TrainingProcess(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
 
-    def __init__(self, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 64):
+    def __init__(self, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 64, min_num_batches_to_train: int = 32):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -28,6 +28,7 @@ class TrainingProcess(Process):
         self.running = True
 
         self.batch_size = batch_size
+        self.min_num_batches_to_train = min_num_batches_to_train
 
         self.neural_net = neural_net
 
@@ -51,14 +52,17 @@ class TrainingProcess(Process):
                     except Empty:
                         break
 
-                self.train_neural_network()
+            self.train_neural_network()
 
-                if len(self.memory.data) % 1000 == 0:
-                    self.memory.save_data()
+            if len(self.memory.data) % 10000 == 0 and len(self.memory.data) > 0:
+                self.memory.save_data()
+
+            if self.training_count % 10000 == 0:
+                self.neural_net.save_network(f'networks/RL_tuned_{self.training_count}.pt')
 
     def train_neural_network(self):
         """ Train the neural network using the experiences from the memory """
-        if len(self.memory) < 32:
+        if len(self.memory) < self.min_num_batches_to_train * self.batch_size:
             return
 
         states, moves, probs, wins = self.memory.get_batch(32)

@@ -4,8 +4,7 @@ from tree.parallel_game_tree import GameTree
 from tree.evaluator import NeuralNetHandling
 from tree.trainer import TrainingProcess
 
-def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, network,
-                  training: bool = True):
+def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True):
     """
     This function initialises all the agents and strings and distributes the queues accordingly
     :param num_agents: number of agents

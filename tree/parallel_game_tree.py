@@ -13,7 +13,7 @@ import multiprocessing as mp
 
 class GameTree(Process):
 
-    add_dirichlet_noise = False
+    add_dirichlet_noise = True
 
     agent_count = 0
 
@@ -138,7 +138,7 @@ class GameTree(Process):
                         states = current_node.state
                         legal_moves = current_node.legal_move_strings
 
-                        self.process_queue_node_lookup[node_hash] = (current_node, visited_moves)
+                        self.process_queue_node_lookup[node_hash] = (current_node, visited_moves, reward)
 
                         self.process_queue.put((self.agent_id, node_hash, states, legal_moves))
 
@@ -226,7 +226,9 @@ class GameTree(Process):
         max_batch_size = 128  # Process up to 10 items at a time
 
         results = []
-        for _ in range(max_batch_size):
+
+        # Clear the queue
+        for _ in range(self.results_queue.qsize()):
             try:
                 results.append(self.results_queue.get_nowait())  # Non-blocking get
             except Empty:
@@ -237,7 +239,7 @@ class GameTree(Process):
             for the_hash, value, move_probs, index_map in results:
 
                 # Retrieve the node associated with this hash
-                node, visited_moves = self.process_queue_node_lookup.pop(the_hash)
+                node, visited_moves, reward = self.process_queue_node_lookup.pop(the_hash)
 
                 # Update node value
                 node.V = value
@@ -247,7 +249,7 @@ class GameTree(Process):
                     node.parent_move.W += value
 
                 # Parameters for Dirichlet noise
-                alpha = 0.3  # Dirichlet distribution parameter
+                alpha = 1  # Dirichlet distribution parameter
                 epsilon = 0.25  # Blending factor
 
                 # Convert move probabilities to a numpy array
@@ -270,7 +272,7 @@ class GameTree(Process):
                     move.P = prob
 
                 node.awaiting_processing = False
-                self.backpropagation(visited_moves, value)
+                self.backpropagation(visited_moves, (value + reward)/2)
 
 
     def train_neural_network_local(self):
@@ -290,7 +292,7 @@ class GameTree(Process):
 
         game_count = 0
         max_length = 300
-        sims = 1000
+        sims = 500
 
         while True:
 
@@ -320,8 +322,8 @@ class GameTree(Process):
                     tau = 0.1
 
                 node, move = self.root.exploratory_select_new_root_node(tau=tau)
-
                 chess_move = chess.Move.from_uci(move)
+                main_board.set_fen(self.root.state)
                 main_board.push(chess_move)
 
                 print(f"Agent {self.agent_id} Game {game_count} Move: {move_count}")
@@ -339,12 +341,13 @@ class GameTree(Process):
                     print("Insufficient material to checkmate!")
                 elif move_count >= max_length:
                     print("Maximum move length")
+                    break
                 else:
 
                     print(
                         f"Move chosen: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
                     print(f"Game over: {main_board.is_game_over()}")
-                    print(f"Memory length: {self.saved_memory_local} Process queue: {self.process_queue.qsize()}")
+                    print(f"Memory length: {self.saved_memory_local} Process queue: {self.process_queue.qsize()} Results queue: {self.results_queue.qsize()}")
                     print(f"Tree node complete: {node.branch_complete} Reason: {node.branch_complete_reason}")
 
                     if main_board.is_check():
@@ -370,6 +373,8 @@ class GameTree(Process):
 
             if not self.multiprocess:
                 self.end_game(white_win)
+
+            game_count += 1
 
 
 class Node:
@@ -433,8 +438,7 @@ class Node:
 
         # Use only valid moves in PUCT calculation
         visits = np.sum(move_N[valid_moves])
-        puct_values = (move_Q[valid_moves]) + \
-                      5.0 * move_P[valid_moves] * np.sqrt(visits + 1) / (move_N[valid_moves] + 1)
+        puct_values = (move_Q[valid_moves]) + 5.0 * move_P[valid_moves] * np.sqrt(visits + 1) / (move_N[valid_moves] + 1)
 
         # Select the move with the maximum PUCT value
         best_value = np.max(puct_values)
@@ -461,12 +465,13 @@ class Node:
         Select child node with the highest Q
         :return:
         """
-        Qs = np.array([move.Q for move in self.moves])
-        illegit_moves = [True if move.N > 0 else False for move in self.moves]
-        Qs[illegit_moves] = -np.inf
+        Qs = np.array([move.Q for move in self.moves]).astype(np.float32)
+        legit_moves = np.array([True if move.N > 0 else False for move in self.moves])
+        Qs[~legit_moves] = -np.inf
         q_max = np.max(Qs)
         max_idxs = np.where(Qs==q_max)[0]
         chosen_move = self.moves[np.random.choice(max_idxs)]
+
         return chosen_move.child_node, chosen_move.move
 
     @property

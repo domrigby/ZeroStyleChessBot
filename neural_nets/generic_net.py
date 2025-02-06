@@ -77,22 +77,28 @@ class GenericNet(nn.Module):
         self.load_state_dict(torch.load(filename))
 
     def create_legal_move_mask(self, moves, team: str = None):
-        # Create a tensor with all zeros, then set the indices corresponding to legal moves to 1
-        legal_move_mask = torch.zeros(self.output_size)
         move_to_indices_lookup = []
 
-        for legal_move in moves:
-            # Need to add pawn promotion
-            if len(str(legal_move)) < 5:
+        # Collect indices for batch updates
+        all_indices = []
 
+        for legal_move in moves:
+            # Ignore pawn promotions for now
+            if len(str(legal_move)) < 5:
                 if team == "black":
-                    # If the team is black we rotate the board so its always playing the same way round
                     legal_move_str = chess_engine.unflip_move(str(legal_move))
                     indices = chess_engine.move_to_target_indices(legal_move_str)
                 else:
                     indices = chess_engine.move_to_target_indices(str(legal_move))
-                legal_move_mask[indices] = 1
+
+                all_indices.append(indices)
                 move_to_indices_lookup.append([legal_move, indices])
+
+        # Create mask efficiently with batched updates
+        legal_move_mask = torch.zeros(self.output_size, dtype=torch.float32)
+        if all_indices:
+            all_indices = torch.tensor(all_indices, dtype=torch.long).flatten()  # Ensure 1D tensor
+            legal_move_mask.index_fill_(0, all_indices, 1)
 
         return legal_move_mask, move_to_indices_lookup
 
@@ -154,37 +160,63 @@ class GenericNet(nn.Module):
         return value.cpu().item()
 
     def tensorise_batch(self, states, moves, probabilities, wins):
-
-        # re-use input only tensorise
         state_tens, legal_move_mask, _ = self.tensorise_inputs(states, moves)
 
-        # init tensors to fill
-        moves_tens = torch.zeros((len(moves), *self.output_size), device=self.device)
-        value_tens = torch.zeros((len(wins), 1), device=self.device)
+        # Preallocate tensors
+        batch_size = len(moves)
+        moves_tens = torch.zeros((batch_size, *self.output_size), device=self.device)
+        value_tens = torch.tensor(wins, dtype=torch.float32, device=self.device).unsqueeze(1)  # Vectorized
 
-        for idx, (state, move_set, prob_set, win) in enumerate(zip(states, moves, probabilities, wins)):
+        # Flatten move sets for batch processing
+        all_indices = []
+        all_probs = []
+        batch_indices = []
 
+        for idx, (move_set, prob_set) in enumerate(zip(moves, probabilities)):
             for move, prob in zip(move_set, prob_set):
                 indices = chess_engine.move_to_target_indices(str(move))
-                moves_tens[idx][indices] = prob
+                all_indices.append(indices)  # Collect indices
+                all_probs.append(prob)  # Collect probabilities
+                batch_indices.append(idx)  # Keep track of batch position
 
-            value_tens[idx] = torch.tensor(win, device=self.device)
+        if all_indices:  # Avoid empty scatter calls
+            all_indices = torch.tensor(all_indices, dtype=torch.long, device=self.device)
+            all_probs = torch.tensor(all_probs, dtype=torch.float32, device=self.device)
+            batch_indices = torch.tensor(batch_indices, dtype=torch.long, device=self.device)
+
+            # Efficiently scatter values into moves_tens
+            moves_tens[batch_indices, all_indices[:, 0], all_indices[:, 1], all_indices[:, 2]] = all_probs
 
         return state_tens, moves_tens, value_tens, legal_move_mask
 
     def tensorise_inputs(self, states, legal_moves):
 
-        state_tens = torch.zeros((len(states), *self.input_size), device=self.device)
-        legal_move_mask = torch.zeros((len(legal_moves), *self.output_size), device=self.device)
+        batch_size = len(states)
+
+        # Preallocate tensors on GPU
+        state_tens = torch.zeros((batch_size, *self.input_size), device=self.device)
+        legal_move_mask = torch.zeros((batch_size, *self.output_size), device=self.device)
+
+        # Collect move masks in CPU lists before batch transfer
+        fen_tensors = []
+        move_masks = []
         legal_move_keys = []
 
-        for idx, (state, move_set) in enumerate(zip(states, legal_moves)):
-            state_tens[idx] = torch.tensor(chess_engine.fen_to_tensor(state), device=self.device)
-            player_turn = "white" if state.split()[1] == 'w' else "black"
-            this_move_mask, key = self.create_legal_move_mask(move_set, player_turn)
-            legal_move_mask[idx] = torch.tensor(this_move_mask, device=self.device)
+        for state, move_set in zip(states, legal_moves):
+            # Convert FEN state to tensor (keep on CPU)
+            fen_tensors.append(chess_engine.fen_to_tensor(state))
 
+            # Determine player turn
+            player_turn = "white" if state.split()[1] == 'w' else "black"
+
+            # Generate legal move mask
+            this_move_mask, key = self.create_legal_move_mask(move_set, player_turn)
+            move_masks.append(this_move_mask)
             legal_move_keys.append(key)
+
+        # Convert all tensors to GPU in one batch
+        state_tens[:] = torch.from_numpy(np.array(fen_tensors)).to(self.device)
+        legal_move_mask[:] = torch.stack(move_masks).to(self.device)  # Move entire batch at once
 
         return state_tens, legal_move_mask, legal_move_keys
 

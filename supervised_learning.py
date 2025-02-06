@@ -31,13 +31,13 @@ class ChessDataset(Dataset):
         for dir in self.move_dirs:
             move_num = os.path.basename(dir)
             try:
-                if int(move_num) > 75:
-                    self.all_moves = self.all_moves + glob.glob(dir + '/*.pkl')
+                if int(move_num):
+                    new_moves = glob.glob(dir + '/*.pkl')
+                    num_new_moves = len(new_moves)
+                    new_moves = list(np.random.choice(new_moves, int(num_new_moves // 5)))
+                    self.all_moves = self.all_moves + new_moves
             except ValueError:
                 print(f"{move_num} was skipped as it could not be converted to an int")
-
-        # self.all_moves = np.random.choice(self.all_moves, 100000)
-
 
         print(f"Dataset built with {len(self.all_moves)} moves.")
 
@@ -70,7 +70,10 @@ class ChessDataset(Dataset):
         else:
             result = -1
 
-        value = data['value']
+        if 'value' in data:
+            value = data['value']
+        else:
+            value = result
 
         # Convert FEN state and move to tensors
         board_tensor = self.chess_engine.fen_to_tensor(fen)
@@ -111,6 +114,7 @@ if __name__ == '__main__':
 
     idx = 0
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.0001)
+    # chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model_37.pt")
 
     import matplotlib.pyplot as plt
     import os
@@ -162,12 +166,12 @@ if __name__ == '__main__':
     rolling_window = 100
     batch_counter = 0
 
+    dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+    print(f"Data points: {len(chess_dataset.all_moves)} Batches: {len(chess_dataset.all_moves) // batch_size}")
+
     # Training loop
     for epoch in range(10000):
 
-        dataloader = DataLoader(chess_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-
-        print(f"Data points: {len(chess_dataset.all_moves)} Batches: {len(chess_dataset.all_moves) // batch_size}")
 
         for batch in dataloader:
             state_tensor = batch['state']
@@ -202,7 +206,7 @@ if __name__ == '__main__':
                 # Save the model if this is the best rolling average
                 if rolling_avg < best_rolling_avg:
                     best_rolling_avg = rolling_avg
-                    torch.save(chess_net.state_dict(), f"networks/best_model_{epoch}.pt")
+                    torch.save(chess_net.state_dict(), f"networks/best_model2_{epoch}.pt")
                     print(f"New best model saved with rolling avg loss: {best_rolling_avg:.4f}")
 
             # Update the plots
