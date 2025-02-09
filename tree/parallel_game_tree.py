@@ -10,6 +10,7 @@ from typing import List, Dict
 from tree.memory import Memory
 import chess_moves
 import multiprocessing as mp
+import cProfile
 
 class GameTree(Process):
 
@@ -52,6 +53,11 @@ class GameTree(Process):
         self.root = Node(state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", board=chess_moves.ChessEngine())
 
     def parallel_search(self, current_node = None, number_of_expansions: int = 1000, time_limit: float = 100.):
+
+        profile = False
+        if profile:
+            profiler = cProfile.Profile()
+            profiler.enable()
 
         if current_node is None:
             current_node = self.root
@@ -155,6 +161,10 @@ class GameTree(Process):
         if self.training:
             self.search_for_sufficiently_visited_nodes(self.root)
 
+        if profile:
+            profiler.disable()
+            profiler.print_stats(sort="cumtime")
+
     @staticmethod
     def undo_informationless_rollout(visited_moves):
         for move in visited_moves:
@@ -230,13 +240,11 @@ class GameTree(Process):
         # Clear the queue
         for _ in range(self.results_queue.qsize()):
             try:
-                results.append(self.results_queue.get_nowait())  # Non-blocking get
+                results = self.results_queue.get_nowait()  # Non-blocking get
             except Empty:
                 break
 
-        if results:
-
-            for the_hash, value, move_probs, index_map in results:
+            for (the_hash, value, move_probs, index_map) in results:
 
                 # Retrieve the node associated with this hash
                 node, visited_moves, reward = self.process_queue_node_lookup.pop(the_hash)
@@ -438,7 +446,7 @@ class Node:
 
         # Use only valid moves in PUCT calculation
         visits = np.sum(move_N[valid_moves])
-        puct_values = (move_Q[valid_moves]) + 5.0 * move_P[valid_moves] * np.sqrt(visits + 1) / (move_N[valid_moves] + 1)
+        puct_values = (move_Q[valid_moves]) + 3.0 * move_P[valid_moves] * np.sqrt(visits + 1) / (move_N[valid_moves] + 1)
 
         # Select the move with the maximum PUCT value
         best_value = np.max(puct_values)
@@ -533,5 +541,5 @@ class Move:
     @property
     def Q(self):
         # Virtual loss is the equivalent of
-        Q =  (self.W + self.virtual_loss) / self.N if self.N > 0 else torch.tensor(0)
+        Q =  (self.W + self.virtual_loss) / self.N if self.N > 0 else 0
         return Q

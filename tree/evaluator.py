@@ -3,6 +3,7 @@ from queue import Empty
 from typing import List, Dict
 from neural_nets.conv_net import ChessNet
 import numpy as np
+import torch
 
 class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
@@ -31,72 +32,64 @@ class NeuralNetHandling(Process):
         self.processed_count = 0
 
     def run(self):
-        # If there are states in the qy
+        """ Optimized function to process queued game states efficiently. """
 
         if self.results_queue is None:
             raise ValueError("NO RESULTS QUEUE: User must provide results queue from their game tree.")
 
         while self.running:
+            agent_ids, hashes, states, legal_moves = [], [], [], []
 
-            agent_ids = []
-            hashes = []
-            states = []
-            legal_moves = []
+            queue_occupancy = np.array([queue.qsize() for queue in self.process_queue], dtype=int)
+            total_occupancy = queue_occupancy.sum()
 
-            # Go through all the queues
-            queue_occupancy = np.array([queue.qsize() for queue in self.process_queue])
+            if total_occupancy == 0:
+                continue  # Skip iteration if queues are empty
 
-            if np.sum(queue_occupancy) == 0:
-                # Skip rest of loop
-                continue
+            # Compute batch allocation **only for non-empty queues**
+            batch_size_allowance = np.round(self.batch_size * queue_occupancy / total_occupancy).astype(int)
 
-            batch_size_allowance = np.round(self.batch_size * queue_occupancy / np.sum(queue_occupancy)).astype(int)
-
-            for idx, queue in enumerate(self.process_queue):
-
-                # Skip if empty
+            # Process each queue in **parallel** (avoids nested loops)
+            for idx, (queue, allowance) in enumerate(zip(self.process_queue, batch_size_allowance)):
                 if queue.empty():
                     continue
 
-                for _ in range(min(queue.qsize(), batch_size_allowance[idx])):
+                for _ in range(min(queue_occupancy[idx], allowance)):  # Limit max processed items
                     try:
-                        agent_id, the_hash, state, legal_moves_strings= queue.get_nowait()
+                        agent_id, the_hash, state, legal_moves_strings = queue.get_nowait()
                         agent_ids.append(agent_id)
                         hashes.append(the_hash)
                         states.append(state)
                         legal_moves.append(legal_moves_strings)
-
                         self.processed_count += 1
                     except Empty:
-                        break
+                        break  # Queue was unexpectedly empty
 
             if self.test_mode:
                 self.test_mode_func(hashes, states, legal_moves)
-                continue
+                continue  # Skip the rest of the loop in test mode
 
-            # Check that items have actually been received
-            if len(hashes) > 0:
+            if not hashes:
+                continue  # Skip inference if nothing was processed
 
-                # Create the input tensors
-                state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
+            # Tensorization & Inference
+            state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
 
-                # Perform forward pass
-                self.neural_net.eval()
+            self.neural_net.eval()
+            with torch.no_grad():  # Prevents unnecessary gradient tracking
                 values, policies = self.neural_net(state_tens, legal_move_mask, infering=True)
-                self.neural_net.train()
+            self.neural_net.train()
 
-                # Results will come in tuples of (node, value, [[edge, prob]])
-                for idx, the_hash in enumerate(hashes):
+            batched_results = {agent_id: [] for agent_id in set(agent_ids)}
 
-                    move_probs = []
-                    for edge, move_idx in legal_move_key[idx]:
-                        move_probs.append([edge, policies[idx][move_idx].item()])
+            # Prepare results for the main thread
+            for agent_id, the_hash, policy, value, key in zip(agent_ids, hashes, policies, values, legal_move_key):
+                move_probs = [[edge, policy[move_idx].item()] for edge, move_idx in key]
+                batched_results[agent_id].append((the_hash, value.item(), move_probs, key))
 
-                    agent_id = agent_ids[idx]
-
-                    # Located correct queue to send back
-                    self.results_queue[agent_id].put((the_hash, values[idx].item(), move_probs, legal_move_key[idx]))
-
+            # Send the batches back
+            for agent_id, results in batched_results.items():
+                self.results_queue[agent_id].put(results)
 
     def test_mode_func(self, hashes, states, legal_moves):
 
