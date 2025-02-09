@@ -4,6 +4,7 @@ from typing import List, Dict
 from neural_nets.conv_net import ChessNet
 import numpy as np
 import torch
+from util.parallel_profiler import parallel_profile
 
 class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
@@ -38,58 +39,63 @@ class NeuralNetHandling(Process):
             raise ValueError("NO RESULTS QUEUE: User must provide results queue from their game tree.")
 
         while self.running:
-            agent_ids, hashes, states, legal_moves = [], [], [], []
+            self.collect_and_process()
 
-            queue_occupancy = np.array([queue.qsize() for queue in self.process_queue], dtype=int)
-            total_occupancy = queue_occupancy.sum()
+    def collect_and_process(self):
+        agent_ids, hashes, states, legal_moves = [], [], [], []
 
-            if total_occupancy == 0:
-                continue  # Skip iteration if queues are empty
+        queue_occupancy = np.array([queue.qsize() for queue in self.process_queue], dtype=int)
+        total_occupancy = queue_occupancy.sum()
 
-            # Compute batch allocation **only for non-empty queues**
-            batch_size_allowance = np.round(self.batch_size * queue_occupancy / total_occupancy).astype(int)
+        if total_occupancy == 0:
+            return
+            # continue  # Skip iteration if queues are empty
 
-            # Process each queue in **parallel** (avoids nested loops)
-            for idx, (queue, allowance) in enumerate(zip(self.process_queue, batch_size_allowance)):
-                if queue.empty():
-                    continue
+        # Compute batch allocation **only for non-empty queues**
+        batch_size_allowance = np.round(self.batch_size * queue_occupancy / total_occupancy).astype(int)
 
-                for _ in range(min(queue_occupancy[idx], allowance)):  # Limit max processed items
-                    try:
-                        agent_id, the_hash, state, legal_moves_strings = queue.get_nowait()
-                        agent_ids.append(agent_id)
-                        hashes.append(the_hash)
-                        states.append(state)
-                        legal_moves.append(legal_moves_strings)
-                        self.processed_count += 1
-                    except Empty:
-                        break  # Queue was unexpectedly empty
+        # Process each queue in **parallel** (avoids nested loops)
+        for idx, (queue, allowance) in enumerate(zip(self.process_queue, batch_size_allowance)):
+            if queue.empty():
+                continue
 
-            if self.test_mode:
-                self.test_mode_func(hashes, states, legal_moves)
-                continue  # Skip the rest of the loop in test mode
+            for _ in range(min(queue_occupancy[idx], allowance)):  # Limit max processed items
+                try:
+                    agent_id, the_hash, state, legal_moves_strings = queue.get_nowait()
+                    agent_ids.append(agent_id)
+                    hashes.append(the_hash)
+                    states.append(state)
+                    legal_moves.append(legal_moves_strings)
+                    self.processed_count += 1
+                except Empty:
+                    break  # Queue was unexpectedly empty
 
-            if not hashes:
-                continue  # Skip inference if nothing was processed
+        if not hashes:
+            return
+            # continue  # Skip inference if nothing was processed
 
-            # Tensorization & Inference
-            state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
+        # Tensorization & Inference
+        state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
 
-            self.neural_net.eval()
-            with torch.no_grad():  # Prevents unnecessary gradient tracking
-                values, policies = self.neural_net(state_tens, legal_move_mask, infering=True)
-            self.neural_net.train()
+        self.neural_net.eval()
+        with torch.no_grad():  # Prevents unnecessary gradient tracking
+            values, policies = self.neural_net(state_tens, legal_move_mask, infering=True)
+        self.neural_net.train()
 
-            batched_results = {agent_id: [] for agent_id in set(agent_ids)}
+        # Move from GPU to CPU. Non-blocking increases speed by allowing us to use a different CUDA core.
+        # Another improvement was to convert whole bacth to numpy rather than using item as apparently that is slow
+        values, policies = values.to("cpu", non_blocking=True).numpy(), policies.to("cpu", non_blocking=True).numpy()
 
-            # Prepare results for the main thread
-            for agent_id, the_hash, policy, value, key in zip(agent_ids, hashes, policies, values, legal_move_key):
-                move_probs = [[edge, policy[move_idx].item()] for edge, move_idx in key]
-                batched_results[agent_id].append((the_hash, value.item(), move_probs, key))
+        batched_results = {agent_id: [] for agent_id in set(agent_ids)}
 
-            # Send the batches back
-            for agent_id, results in batched_results.items():
-                self.results_queue[agent_id].put(results)
+        # Prepare results for the main thread
+        for agent_id, the_hash, policy, value, key in zip(agent_ids, hashes, policies, values, legal_move_key):
+            move_probs = [[edge, policy[move_idx]] for edge, move_idx in key]
+            batched_results[agent_id].append((the_hash, value, move_probs, key))
+
+        # Send the batches back
+        for agent_id, results in batched_results.items():
+            self.results_queue[agent_id].put(results)
 
     def test_mode_func(self, hashes, states, legal_moves):
 

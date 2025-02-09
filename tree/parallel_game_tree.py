@@ -3,14 +3,15 @@ import numpy as np
 from numpy.random import default_rng
 from copy import copy
 import time
-import torch
 from multiprocessing import Queue, Process
 from queue import Empty
 from typing import List, Dict
 from tree.memory import Memory
 import chess_moves
-import multiprocessing as mp
-import cProfile
+
+from util.parallel_profiler import parallel_profile
+def all_custom(iterable):
+    return bool(iterable) and all(iterable)
 
 class GameTree(Process):
 
@@ -54,11 +55,6 @@ class GameTree(Process):
 
     def parallel_search(self, current_node = None, number_of_expansions: int = 1000, time_limit: float = 100.):
 
-        profile = False
-        if profile:
-            profiler = cProfile.Profile()
-            profiler.enable()
-
         if current_node is None:
             current_node = self.root
 
@@ -70,45 +66,48 @@ class GameTree(Process):
 
         for idx in range(number_of_expansions):
 
-            # Thread num is used a draw breaker for early iterations such that they dont search down the same branch
-            visited_moves: List[Move] = []
+            # Thread num is used a draw breaker for early iterations such that they don't search down the same branch
+            visited_moves = []
             move_has_child_node = True
 
-            # Expand to leaf
+            # Explore to leaf
             while move_has_child_node and not current_node.branch_complete:
 
                 # Select
-                move = current_node.puct(rng_generator=thread_rng)
-                visited_moves.append(move)
+                move_idx, new_move = current_node.puct(rng_generator=thread_rng)
+                visited_moves.append([current_node, move_idx])
 
                 # Statistics
-                move.N += 1
+                current_node.Ns[move_idx] += 1
 
                 # Set virtual loss to discourage search down here for a bit
                 if self.multiprocess:
-                    move.virtual_loss -= 1.
+                    current_node.virtual_losses[move_idx] -= 1.
 
-                if move.child_node:
-
+                if move_idx in current_node.child_nodes:
                     # Get new node and then a new move
-                    current_node = move.child_node
+                    current_node = current_node.child_nodes[move_idx]
 
                 else:
                     # We have found a leaf move
                     move_has_child_node = False
 
-                # Check for bottleneck conditions
-                while self.multiprocess and all([move.child_node and move.child_node.awaiting_processing
-                                                and not move.child_node.branch_complete
-                                                for move in current_node.moves]) and not current_node.branch_complete:
-                    print(f"\rBOTTLENECK WARNING: Queue size: {self.process_queue.qsize()} {[move.child_node.awaiting_processing for move in current_node.moves]}", end='')
-                    # Clear the queue
-                    self.apply_neural_net_results()
+                # Check for bottleneck conditions: despite virtual loss we have reached a state in which all moves are awaiting processing
+                if self.multiprocess and all_custom(move_idx in current_node.child_nodes and current_node.child_nodes[move_idx].awaiting_processing
+                                         and not current_node.branch_complete for move_idx in range(len(current_node.moves))):
+
+                    print(f"\rBOTTLENECK WARNING: Queue size: {self.process_queue.qsize()} "
+                          f"{[child_node.awaiting_processing for child_node in current_node.child_nodes.values()]}")
+
+                    print(move_idx in current_node.child_nodes)
+
+                    while all_custom(current_node.child_nodes[move_idx].awaiting_processing for move_idx in range(len(current_node.moves))):
+                        self.apply_neural_net_results()
 
                 # If the queue has become too fully than wait for it to process... get it down to batch size for the
                 # actual call to finish off
-                while self.multiprocess and self.process_queue.qsize() > 128:
-                    self.apply_neural_net_results()
+                # while self.multiprocess and self.process_queue.qsize() > 128:
+                #     self.apply_neural_net_results()
 
                 if not self.multiprocess and self.training and idx % 30 == 0:
                     self.train_neural_network_local()
@@ -116,16 +115,18 @@ class GameTree(Process):
                 if self.multiprocess:
                     self.apply_neural_net_results()
 
-                if move is None:
+                if move_idx is None:
                     break
 
-                if all([move.child_node and move.child_node.branch_complete for move in current_node.moves]):
+                if all([child_node_idx in current_node.child_nodes
+                        and current_node.child_nodes[child_node_idx].branch_complete
+                        for child_node_idx in range(len(current_node.moves))]):
                     current_node.branch_complete = True
 
-            if not current_node.branch_complete and move is not None and visited_moves:
-                # If the graph is complete its already been done
+            if not current_node.branch_complete and move_idx is not None and visited_moves:
 
-                current_node, reward, done = move.expand(thread_env, state=current_node.state)
+                # If the graph is complete its already been done
+                current_node, reward, done = current_node.expand(move_idx, thread_env, state=current_node.state)
 
                 if not self.multiprocess:
                     value = self.neural_net.node_evaluation(current_node)
@@ -161,16 +162,12 @@ class GameTree(Process):
         if self.training:
             self.search_for_sufficiently_visited_nodes(self.root)
 
-        if profile:
-            profiler.disable()
-            profiler.print_stats(sort="cumtime")
-
     @staticmethod
     def undo_informationless_rollout(visited_moves):
-        for move in visited_moves:
+        for node, move_idx in visited_moves:
             # Undo stats
-            move.N -= 1
-            move.virtual_loss += 1
+            node.Ns[move_idx] -= 1
+            node.virtual_losses[move_idx] += 1
 
     def backpropagation(self, visited_moves, observed_reward: float):
 
@@ -178,14 +175,14 @@ class GameTree(Process):
 
         # This is the other player as player who made a the move into the new state is the opposite player to whos turn
         # it is in the state
-        player = visited_moves[-1].parent_node.player
+        player = visited_moves[-1][0].player
 
-        for idx, move in enumerate(reversed(visited_moves)):
+        for idx, (node, move_idx) in enumerate(reversed(visited_moves)):
 
             # After doing a need evaluation, we get the other players chance of winning...
             # We therefore flip the score when it us playing
 
-            if move.parent_node.player == player:
+            if node.player == player:
                 # Flip for when the other player is observing reward
                 flip = -1
             else:
@@ -194,10 +191,10 @@ class GameTree(Process):
             # Increment the visit count and update the total reward
             new_Q = gamma_factor**idx * flip * observed_reward
 
-            move.W += new_Q
+            node.Ws[move_idx] += new_Q
 
             if self.multiprocess:
-                move.virtual_loss += 1
+                node.virtual_losses[move_idx] += 1
 
     def search_for_sufficiently_visited_nodes(self, root_node):
         def recursive_search(node, count):
@@ -207,9 +204,9 @@ class GameTree(Process):
 
             self.save_results_to_memory(node, root_node)
 
-            for move in node.moves:
-                if move.N >= 100 and move.child_node:
-                    recursive_search(move.child_node, count + 1)
+            for move_idx in range(len(node.moves)):
+                if node.Ns[move_idx] >= 100 and move_idx in node.child_nodes:
+                    recursive_search(node.child_nodes[move_idx], count + 1)
 
             return
 
@@ -218,8 +215,8 @@ class GameTree(Process):
     def save_results_to_memory(self, current_node, root_node):
 
         state = current_node.state
-        moves = [move.move for move in current_node.moves]
-        visit_counts = [move.N for move in current_node.moves]
+        moves = current_node.moves
+        visit_counts = current_node.Ns
         predicted_value = current_node.V
 
         self.saved_memory_local += 1
@@ -233,10 +230,7 @@ class GameTree(Process):
         """
         Process results from the neural network in batches, updating nodes and applying Dirichlet noise.
         """
-        max_batch_size = 128  # Process up to 10 items at a time
-
-        results = []
-
+        batch_processed = False
         # Clear the queue
         for _ in range(self.results_queue.qsize()):
             try:
@@ -251,10 +245,6 @@ class GameTree(Process):
 
                 # Update node value
                 node.V = value
-
-                # Update parent's move total value if applicable
-                if node.parent_move is not None:
-                    node.parent_move.W += value
 
                 # Parameters for Dirichlet noise
                 alpha = 1  # Dirichlet distribution parameter
@@ -276,12 +266,14 @@ class GameTree(Process):
                     Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
 
                 # Update move probabilities
-                for move, prob in zip(node.moves, Ps):
-                    move.P = prob
+                for move_idx, prob in zip(range(len(node.moves)), Ps):
+                    node.Ps[move_idx] = prob
 
                 node.awaiting_processing = False
                 self.backpropagation(visited_moves, (value + reward)/2)
+                batch_processed = True
 
+        return batch_processed
 
     def train_neural_network_local(self):
         if len(self.memory) < 32:
@@ -329,7 +321,7 @@ class GameTree(Process):
                 else:
                     tau = 0.1
 
-                node, move = self.root.exploratory_select_new_root_node(tau=tau)
+                node, move, move_idx = self.root.exploratory_select_new_root_node(tau=tau)
                 chess_move = chess.Move.from_uci(move)
                 main_board.set_fen(self.root.state)
                 main_board.push(chess_move)
@@ -353,7 +345,7 @@ class GameTree(Process):
                 else:
 
                     print(
-                        f"Move chosen: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
+                        f"Move chosen: {move} Prob: {node.parent_node.Ps[move_idx]:.3f} Q: {node.parent_node.Qs[move_idx]:.3f} N: {node.parent_node.Ns[move_idx]}")
                     print(f"Game over: {main_board.is_game_over()}")
                     print(f"Memory length: {self.saved_memory_local} Process queue: {self.process_queue.qsize()} Results queue: {self.results_queue.qsize()}")
                     print(f"Tree node complete: {node.branch_complete} Reason: {node.branch_complete_reason}")
@@ -387,14 +379,14 @@ class GameTree(Process):
 
 class Node:
 
-    def __init__(self, state: str , board: chess_moves.ChessEngine =None, parent_move =None):
+    def __init__(self, state: str , board: chess_moves.ChessEngine =None, parent_node =None):
 
         # The chess fen string object representing this state
         self.state: str = state
         self.player: str = self.state.split()[1]
 
         # Save a reference to the parent node
-        self.parent_move = parent_move  # Reference to the parent move
+        self.parent_node = parent_node  # Reference to the parent move
 
         # Generate child nodes for legal moves
         board.set_fen(self.state)
@@ -409,16 +401,14 @@ class Node:
             self.branch_complete = False
 
         # Create edges
-        self.moves: List[Move] = []
-        created_move_num = len(self.moves)
-        for idx, move in enumerate(legal_moves):
-            self.moves.append(Move(self, move))
+        self.moves = legal_moves
+        self.Ws = np.zeros(len(self.moves))
+        self.Ns = np.zeros(len(self.moves))
+        self.Ps = np.zeros(len(self.moves))
+        self.virtual_losses = np.zeros(len(self.moves))
+        self.child_nodes: Dict[int, Node] = {}
 
-        if self.number_legal_moves < len(self.moves):
-            # Get rid of excess moves
-            self.moves = self.moves[:self.number_legal_moves]
-
-        # Save whos go it is
+        # Save whose go it is
         self.team = "white" if self.state.split()[1] == 'w' else "black"
 
         # State value
@@ -433,20 +423,24 @@ class Node:
         Select the best move using the PUCT formula,
         ignoring moves that lead to completed branches.
         """
-        move_N = np.array([move.N for move in self.moves])
-        move_P = np.array([move.P for move in self.moves])
-        move_Q = np.array([move.Q for move in self.moves])
-        branch_complete = np.array([move.child_node.branch_complete if move.child_node is not None else False for move in self.moves])
+        branch_complete = np.zeros(len(self.moves), dtype=np.bool_)
+        for move_idx, child_node in self.child_nodes.items():
+            branch_complete[move_idx] = child_node.branch_complete
 
         # Ignore completed branches
         valid_moves = np.where(~branch_complete)[0]
 
-        if len(valid_moves) == 0:
-            return None
+        if sum(valid_moves) == 0:
+            return None, None
 
         # Use only valid moves in PUCT calculation
-        visits = np.sum(move_N[valid_moves])
-        puct_values = (move_Q[valid_moves]) + 3.0 * move_P[valid_moves] * np.sqrt(visits + 1) / (move_N[valid_moves] + 1)
+        visits = np.sum(self.Ns[valid_moves])
+
+        Qs = self.Ws/self.Ns
+        Qs[self.Ns==0] = 0
+        Qs[~valid_moves] = -np.inf
+
+        puct_values = Qs + 3.0 * self.Ps * np.sqrt(visits + 1) / (self.Ns + 1)
 
         # Select the move with the maximum PUCT value
         best_value = np.max(puct_values)
@@ -454,80 +448,26 @@ class Node:
 
         best_index = rng_generator.choice(best_indexes)
 
-        return self.moves[best_index]
+        return best_index, self.moves[best_index]
 
-    def exploratory_select_new_root_node(self, tau: float = 1.0):
-        """
-        Select a random child node with a temperature adjusted probability distribution
-        :param tau:
-        :return:
-        """
-        Ns = np.array([move.N for move in self.moves])
-        N_to_tau = np.power(Ns, 1./tau)
-        probs = N_to_tau / np.sum(N_to_tau)
-        chosen_move = np.random.choice(self.moves, p=probs)
-        return chosen_move.child_node, chosen_move.move
-
-    def greedy_select_new_root_node(self):
-        """
-        Select child node with the highest Q
-        :return:
-        """
-        Qs = np.array([move.Q for move in self.moves]).astype(np.float32)
-        legit_moves = np.array([True if move.N > 0 else False for move in self.moves])
-        Qs[~legit_moves] = -np.inf
-        q_max = np.max(Qs)
-        max_idxs = np.where(Qs==q_max)[0]
-        chosen_move = self.moves[np.random.choice(max_idxs)]
-
-        return chosen_move.child_node, chosen_move.move
-
-    @property
-    def legal_move_strings(self):
-        return [str(move) for move in self.moves]
-
-class Move:
-
-    def __init__(self, parent_node: Node, move: str):
-
-        self.parent_node = parent_node
-        self.move = move
-
-        self.child_node = None
-
-        # Move statistics
-        self.W = 0.
-        self.N = 0.
-        self.P = 1.
-
-        # When minimax is turned on we used Q_max rather than Q mean
-        # This works under assumption than player will make their best move rather than a random one
-        self.Q_max = -np.inf
-
-        # Multi-processing variables
-        self.virtual_loss = 0
-
-    def __str__(self):
-        return str(self.move)
-
-    def expand(self, board: chess.Board, state: str):
+    def expand(self, move_idx: int, board: chess.Board, state: str):
 
         if state is None:
             state = board.fen()  # Update the board state to the provided FEN string
 
         # Run the sim to update the board
-        new_state = board.push(state, str(self.move))
+        new_state: str = board.push(state, self.moves[move_idx])
 
         # Create a new child node
-        self.child_node = Node(new_state, board, parent_move=self)
+        self.child_nodes[move_idx] = Node(new_state, board, parent_node=self)
 
         # Calculate the reward
         done, result_code = board.is_game_over()
 
         if done:
             print("\rEnd game found!", end="")
-            self.child_node.branch_complete_reason = f'End game found in sim: {result_code}'
-            self.child_node.branch_complete = True
+            self.child_nodes[move_idx].branch_complete_reason = f'End game found in sim: {result_code}'
+            self.child_nodes[move_idx].branch_complete = True
             if result_code == 1:
                 reward = 1.
             else:
@@ -536,10 +476,36 @@ class Move:
             reward = 0.
 
         # Update statistic
-        return self.child_node, reward, done
+        return self.child_nodes[move_idx], reward, done
+
+    def exploratory_select_new_root_node(self, tau: float = 1.0):
+        """
+        Select a random child node with a temperature adjusted probability distribution
+        :param tau:
+        :return:
+        """
+        N_to_tau = np.power(self.Ns, 1./tau)
+        probs = N_to_tau / np.sum(N_to_tau)
+        chosen_move = np.random.choice(len(self.moves), p=probs)
+        return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
+
+    def greedy_select_new_root_node(self):
+        """
+        Select child node with the highest Q
+        :return:
+        """
+        Qs = self.Ws/self.Ns
+        legit_moves = self.Ns > 0
+        Qs[~legit_moves] = -np.inf
+        q_max = np.max(Qs)
+        max_idxs = np.where(Qs==q_max)[0]
+        chosen_move = np.random.choice(max_idxs)
+        return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
     @property
-    def Q(self):
-        # Virtual loss is the equivalent of
-        Q =  (self.W + self.virtual_loss) / self.N if self.N > 0 else 0
-        return Q
+    def legal_move_strings(self):
+        return [str(move) for move in self.moves]
+
+    @property
+    def Qs(self):
+        return self.Ws/self.Ns

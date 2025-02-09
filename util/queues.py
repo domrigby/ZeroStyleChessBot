@@ -47,7 +47,7 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
     evaluators: List[NeuralNetHandling] = []
     for idx in range(num_evaluators):
         evaluator = NeuralNetHandling(neural_net=network, process_queues=process_queues[idx],
-                                     results_queue_dict=results_queue_dicts, batch_size=128)
+                                     results_queue_dict=results_queue_dicts, batch_size=256)
         evaluators.append(evaluator)
 
     trainers: List[TrainingProcess] = []

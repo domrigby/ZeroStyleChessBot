@@ -57,7 +57,7 @@ if __name__ == '__main__':
         else:
             tau = 0.01
 
-        node, move = tree.root.greedy_select_new_root_node()
+        node, move, move_idx = tree.root.greedy_select_new_root_node()
 
         chess_move = chess.Move.from_uci(move)
         main_board.push(chess_move)
@@ -72,7 +72,8 @@ if __name__ == '__main__':
             file.write(svg)
 
         if node:
-            print(f"Move: {move} Prob: {node.parent_move.P:.3f} Q: {node.parent_move.Q:.3f} N: {node.parent_move.N}")
+            print(
+                f"Move chosen: {move} Prob: {node.parent_node.Ps[move_idx]:.3f} Q: {node.parent_node.Qs[move_idx]:.3f} N: {node.parent_node.Ns[move_idx]}")
         print(f"Game over: {main_board.is_game_over()}")
         print('\n')
 
