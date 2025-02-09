@@ -226,7 +226,7 @@ class GenericNet(nn.Module):
             move_masks[i] = this_move_mask
             legal_move_keys.append(key)
 
-        # Move all data to GPU in one batch transfer (fastest way)
+        # Move all data to GPU in one batch transfer
         state_tens.copy_(torch.from_numpy(fen_tensors).to(self.device, non_blocking=True))
         legal_move_mask.copy_(torch.from_numpy(move_masks).to(self.device, non_blocking=True))
 

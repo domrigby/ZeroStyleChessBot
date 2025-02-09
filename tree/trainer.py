@@ -11,8 +11,10 @@ from neural_nets.conv_net import ChessNet
 
 class TrainingProcess(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
+    min_games_to_train = 100
 
-    def __init__(self, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 64, min_num_batches_to_train: int = 32):
+    def __init__(self, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 64,
+                 min_num_batches_to_train: int = 32, num_agents: int = 1):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -32,7 +34,7 @@ class TrainingProcess(Process):
 
         self.neural_net = neural_net
 
-        self.memory = Memory(100000)
+        self.memory = Memory(100000, num_agents=num_agents)
 
     def set_experience_queue(self, experience_queue: Queue):
         self.experience_queue = experience_queue
@@ -47,17 +49,20 @@ class TrainingProcess(Process):
 
                 for _ in range(self.batch_size):
                     try:
-                        state, moves, visit_counts, predicted_value, is_root_node = queue.get_nowait()
-                        self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, is_root_node)
+                        state, moves, visit_counts, predicted_value, game_over, agent_id, winner = queue.get_nowait()
+                        self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, game_over=game_over,
+                                                        agent_id=agent_id, winner=winner)
                     except Empty:
                         break
 
-            self.train_neural_network()
+            # Ensure we have enough diverse enough data to train
+            if self.memory.games_played >= self.min_games_to_train:
+                self.train_neural_network()
 
-            if len(self.memory.data) % 10000 == 0 and len(self.memory.data) > 0:
+            if len(self.memory.data) % 1000 == 0 and len(self.memory.data) > 0:
                 self.memory.save_data()
 
-            if self.training_count % 10000 == 0:
+            if self.training_count % 1000 == 0:
                 self.neural_net.save_network(f'networks/RL_tuned_{self.training_count}.pt')
 
     def train_neural_network(self):

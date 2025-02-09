@@ -17,7 +17,6 @@ if __name__ == "__main__":
     NUM_AGENTS = 3
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
-    #chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model2_23.pt")
     chess_net.share_memory()
 
     agents, evaluators, trainers = create_agents(NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS, chess_net)

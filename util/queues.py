@@ -33,7 +33,7 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
 
         if num_trainers:
             training_queue = Queue()
-            training_queues[int(idx//agents_per_trainer)].append(training_queue)
+            training_queues[int(idx // agents_per_trainer)].append(training_queue)
         else:
             training_queue = None
 
@@ -52,7 +52,8 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
 
     trainers: List[TrainingProcess] = []
     for idx in range(num_trainers):
-        trainers.append(TrainingProcess(neural_net=network, experience_queues=training_queues[idx], batch_size=128))
+        trainers.append(TrainingProcess(neural_net=network, experience_queues=training_queues[idx], batch_size=128,
+                        num_agents=num_agents))
 
     return agents, evaluators, trainers
 

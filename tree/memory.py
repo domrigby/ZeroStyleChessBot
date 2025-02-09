@@ -1,9 +1,8 @@
 from torch.utils.data import Dataset, DataLoader
-from typing import List
+from typing import List, Dict, Optional
 import numpy as np
 from enum import Enum
 import pickle as pkl
-
 
 class Turn(Enum):
     BLACK = 'black'
@@ -11,17 +10,19 @@ class Turn(Enum):
 
 
 class DataPoint:
-    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.):
+    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.,
+                 parent_datapoint = None):
         self.state = state
         self.moves = moves
         self.probs = probs
         self.win_val = win_val
-        self.white_turn = True if state.split()[1] == 'w' else False
+        self.player = state.split()[1]
+        self.parent_datapont = parent_datapoint
 
 
 class Memory:
 
-    def __init__(self, length_buffer, preload_data: str = None):
+    def __init__(self, length_buffer, preload_data: str = None, num_agents: int = 1):
 
         # Save the states
         self.data: List[DataPoint] = []
@@ -35,6 +36,10 @@ class Memory:
 
         self.max_len = length_buffer
 
+        self.last_moves: Dict[int, Optional[DataPoint]] = {}
+        for agent_num in range(num_agents):
+            self.last_moves[agent_num] = None
+
         if preload_data is not None:
             self.load_data(preload_data)
 
@@ -42,9 +47,7 @@ class Memory:
         return len(self.data)
 
     def save_state_to_moves(self, state: str, observed_moves: List[str], visits: List[int], value: float = 0.,
-                            is_root_node: bool = False):
-
-        #TODO: its prob faster to do tensor conversion here
+                            game_over: bool = False, agent_id: int = 0, winner: str = None):
 
         moves: List[str] = []
         probs: List[float] = []
@@ -54,11 +57,15 @@ class Memory:
             moves.append(move)
             probs.append(count/total)
 
-        data_point = DataPoint(state, moves, probs, value)
+        data_point = DataPoint(state, moves, probs, value, self.last_moves[agent_id])
 
-        # TODO work out how to integrate this with multiprocssing
-        # if is_root_node:
-        #     self.turn_list.append(data_point)
+        if not game_over:
+            self.last_moves[agent_id] = data_point
+        else:
+            if winner is not None:
+                self.end_game(data_point, winner)
+            self.last_moves[agent_id] = None
+            self.games_played += 1
 
         self.data.append(data_point)
 
@@ -75,21 +82,15 @@ class Memory:
 
         return states, moves, probs, wins
 
+    def end_game(self, last_node: DataPoint, winner: str):
+        node = last_node
 
-    def end_game(self, white_win: bool):
+        while node.parent_datapont:
 
-        # Go through the memories and update the winner
-        for memory in self.turn_list:
-            if white_win is None:
-                memory.win_val = 0
-            elif not memory.white_turn ^ white_win:
-                memory.win_val = 1
+            if node.player == winner:
+                last_node.win_val = 1
             else:
-                memory.win_val = -1
-
-        # Empty list
-        self.turn_list = []
-        self.games_played += 1
+                last_node.win_val = -1
 
     def load_data(self, path: str = "neural_nets/data/games.pkl", sample_size: int = 100000):
         # Slow but we only do it once

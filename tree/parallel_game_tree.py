@@ -16,6 +16,7 @@ def all_custom(iterable):
 class GameTree(Process):
 
     add_dirichlet_noise = True
+    save_non_root_states = False
 
     agent_count = 0
 
@@ -25,7 +26,7 @@ class GameTree(Process):
 
         super().__init__()
 
-        self.agent_id = copy(GameTree.agent_count)
+        self.agent_id = GameTree.agent_count
         GameTree.agent_count += 1
 
         # Training switch
@@ -53,7 +54,7 @@ class GameTree(Process):
     def reset(self):
         self.root = Node(state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", board=chess_moves.ChessEngine())
 
-    def parallel_search(self, current_node = None, number_of_expansions: int = 1000, time_limit: float = 100.):
+    def parallel_search(self, current_node = None, number_of_expansions: int = 1000):
 
         if current_node is None:
             current_node = self.root
@@ -99,15 +100,13 @@ class GameTree(Process):
                     print(f"\rBOTTLENECK WARNING: Queue size: {self.process_queue.qsize()} "
                           f"{[child_node.awaiting_processing for child_node in current_node.child_nodes.values()]}")
 
-                    print(move_idx in current_node.child_nodes)
-
                     while all_custom(current_node.child_nodes[move_idx].awaiting_processing for move_idx in range(len(current_node.moves))):
                         self.apply_neural_net_results()
 
                 # If the queue has become too fully than wait for it to process... get it down to batch size for the
                 # actual call to finish off
-                # while self.multiprocess and self.process_queue.qsize() > 128:
-                #     self.apply_neural_net_results()
+                while self.multiprocess and self.process_queue.qsize() > 128:
+                    self.apply_neural_net_results()
 
                 if not self.multiprocess and self.training and idx % 30 == 0:
                     self.train_neural_network_local()
@@ -197,22 +196,29 @@ class GameTree(Process):
                 node.virtual_losses[move_idx] += 1
 
     def search_for_sufficiently_visited_nodes(self, root_node):
-        def recursive_search(node, count):
 
-            if node.branch_complete or count > 400:
-                return
+        if self.save_non_root_states:
+            self.recursive_search(root_node, 0, root_node)
+        else:
+            self.save_results_to_memory(root_node)
 
-            self.save_results_to_memory(node, root_node)
+    def recursive_search(self, node, count, root_node):
+        """
+        Recursively searches for sufficiently visited nodes
+        """
 
-            for move_idx in range(len(node.moves)):
-                if node.Ns[move_idx] >= 100 and move_idx in node.child_nodes:
-                    recursive_search(node.child_nodes[move_idx], count + 1)
-
+        if node.branch_complete or count > 400:
             return
 
-        recursive_search(root_node, 0)
+        self.save_results_to_memory(node, root_node)
 
-    def save_results_to_memory(self, current_node, root_node):
+        for move_idx in range(len(node.moves)):
+            if node.Ns[move_idx] >= 100 and move_idx in node.child_nodes:
+                self.recursive_search(node.child_nodes[move_idx], count + 1)
+
+        return
+
+    def save_results_to_memory(self, current_node):
 
         state = current_node.state
         moves = current_node.moves
@@ -221,10 +227,17 @@ class GameTree(Process):
 
         self.saved_memory_local += 1
 
+        # See if the game has been won
+        winner = None
+        if current_node.game_won:
+            winner = current_node.player
+
         if not self.multiprocess:
-            self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, current_node is root_node)
+            self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, current_node.branch_complete,
+                                            self.agent_id, winner)
         else:
-            self.experience_queue.put((state, moves, visit_counts, predicted_value, current_node is root_node))
+            self.experience_queue.put((state, moves, visit_counts, predicted_value, current_node.branch_complete,
+                                       self.agent_id, winner))
 
     def apply_neural_net_results(self):
         """
@@ -399,6 +412,8 @@ class Node:
             self.branch_complete = True
         else:
             self.branch_complete = False
+
+        self.game_won = False
 
         # Create edges
         self.moves = legal_moves
