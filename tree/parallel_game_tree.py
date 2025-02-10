@@ -501,6 +501,7 @@ class Node:
         """
         N_to_tau = np.power(self.Ns, 1./tau)
         probs = N_to_tau / np.sum(N_to_tau)
+        probs[self.Ns == 0] = 0 # Assert this... was occassioanlly getting an error in which it chooses unvisited
         chosen_move = np.random.choice(len(self.moves), p=probs)
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 

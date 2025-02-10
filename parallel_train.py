@@ -4,6 +4,11 @@ from neural_nets.conv_net import ChessNet
 
 from util.queues import create_agents
 
+class ParallelMonitor:
+
+    def __init__(self):
+        pass
+
 if __name__ == "__main__":
     try:
        mp.set_start_method('spawn', force=True)

@@ -28,6 +28,7 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
 
         process_queue = Queue()
         results_queue = Queue()
+        data_queue = Queue()
 
         process_queues[int(idx//agents_per_evaluator)].append(process_queue)
 
