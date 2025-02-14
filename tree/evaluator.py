@@ -91,7 +91,7 @@ class NeuralNetHandling(Process):
         # Prepare results for the main thread
         for agent_id, the_hash, policy, value, key in zip(agent_ids, hashes, policies, values, legal_move_key):
             move_probs = [[edge, policy[move_idx]] for edge, move_idx in key]
-            batched_results[agent_id].append((the_hash, value, move_probs, key))
+            batched_results[agent_id].append((the_hash, value.item(), move_probs, key))
 
         # Send the batches back
         for agent_id, results in batched_results.items():

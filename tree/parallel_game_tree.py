@@ -1,33 +1,41 @@
 import chess
 import numpy as np
 from numpy.random import default_rng
-from copy import copy
 import time
 from multiprocessing import Queue, Process
 from queue import Empty
 from typing import List, Dict
 from tree.memory import Memory
 import chess_moves
+import os
 
+from util.parallel_error_log import error_logger
 from util.parallel_profiler import parallel_profile
+from util.chess_functions import save_chess_board_as_im
+
 def all_custom(iterable):
-    return bool(iterable) and all(iterable)
+    return len(iterable) > 0 and all(iterable)
 
 class GameTree(Process):
 
     add_dirichlet_noise = True
     save_non_root_states = False
+    save_images_of_checkmates = True
 
     agent_count = 0
 
-    def __init__(self, neural_net = None, training: bool =  False,
+    def __init__(self, save_dir: str, neural_net = None, training: bool =  False,
                  multiprocess: bool = False, process_queue: Queue = None,
-                 experience_queue: Queue = None, results_queue: Queue = None):
+                 experience_queue: Queue = None, results_queue: Queue = None,
+                 data_queue: Queue = None):
 
         super().__init__()
 
         self.agent_id = GameTree.agent_count
         GameTree.agent_count += 1
+
+        self.save_dir = save_dir
+        self.log_file_name = os.path.join(save_dir, f"{self.__class__.__name__}_{self.agent_id}.txt")
 
         # Training switch
         self.training = training
@@ -47,6 +55,7 @@ class GameTree(Process):
 
             self.experience_queue = experience_queue
             self.results_queue = results_queue
+            self.data_queue = data_queue
 
         # Initiate root
         self.root = None
@@ -59,7 +68,7 @@ class GameTree(Process):
         if current_node is None:
             current_node = self.root
 
-        # Sharing a random number generator SEVERELY slows down the process... explainationn pending
+        # Sharing a random number generator SEVERELY slows down the process... explaination pending
         thread_rng = default_rng()
 
         # Initialise the threads env
@@ -94,13 +103,13 @@ class GameTree(Process):
                     move_has_child_node = False
 
                 # Check for bottleneck conditions: despite virtual loss we have reached a state in which all moves are awaiting processing
-                if self.multiprocess and all_custom(move_idx in current_node.child_nodes and current_node.child_nodes[move_idx].awaiting_processing
-                                         and not current_node.branch_complete for move_idx in range(len(current_node.moves))):
+                if self.multiprocess and all_custom([move_idx in current_node.child_nodes and current_node.child_nodes[move_idx].awaiting_processing
+                                     and not current_node.branch_complete for move_idx in range(len(current_node.moves))]):
 
                     print(f"\rBOTTLENECK WARNING: Queue size: {self.process_queue.qsize()} "
-                          f"{[child_node.awaiting_processing for child_node in current_node.child_nodes.values()]}")
+                          f"{[current_node.child_nodes[move_idx].awaiting_processing for move_idx in range(len(current_node.moves))]}")
 
-                    while all_custom(current_node.child_nodes[move_idx].awaiting_processing for move_idx in range(len(current_node.moves))):
+                    while all_custom([current_node.child_nodes[move_idx].awaiting_processing for move_idx in range(len(current_node.moves))]):
                         self.apply_neural_net_results()
 
                 # If the queue has become too fully than wait for it to process... get it down to batch size for the
@@ -301,6 +310,7 @@ class GameTree(Process):
     def run(self):
         self.train()
 
+    @error_logger
     def train(self, n_games: int = 1000000):
 
         game_count = 0
@@ -346,12 +356,20 @@ class GameTree(Process):
                 print(f"FEN String: {main_board.fen()}")
 
                 if main_board.is_checkmate():
+
                     print("Checkmate!")
                     winner = main_board.fen().split()[1]
+
+                    if self.save_images_of_checkmates:
+                        save_chess_board_as_im(main_board, f"{self.save_dir}/agent_{self.agent_id}_game_{game_count}.svg",
+                                               move=chess_move)
+
                 elif main_board.is_stalemate():
                     print("Stalemate!")
+
                 elif main_board.is_insufficient_material():
                     print("Insufficient material to checkmate!")
+
                 elif move_count >= max_length:
                     print("Maximum move length")
                     break
@@ -375,6 +393,8 @@ class GameTree(Process):
                     move_count += 1
 
                 if self.root.branch_complete:
+                    # TODO... this causes a problem
+                    self.save_results_to_memory(self.root)
                     break
 
             if winner == 'w':
@@ -387,7 +407,14 @@ class GameTree(Process):
             if not self.multiprocess:
                 self.end_game(white_win)
 
+            if self.data_queue is not None:
+                self.send_update_to_main_thread(white_win, move_count)
+
             game_count += 1
+
+    def send_update_to_main_thread(self, white_win: bool, game_length: int):
+        game_data_dict = {'white_win': white_win, 'game_length': game_length}
+        self.data_queue.put_nowait(game_data_dict)
 
 
 class Node:
@@ -438,7 +465,12 @@ class Node:
         Select the best move using the PUCT formula,
         ignoring moves that lead to completed branches.
         """
+        if self.number_legal_moves == 1:
+            # Save some compute
+            return 0, self.moves[0]
+
         branch_complete = np.zeros(len(self.moves), dtype=np.bool_)
+
         for move_idx, child_node in self.child_nodes.items():
             branch_complete[move_idx] = child_node.branch_complete
 
@@ -485,10 +517,13 @@ class Node:
             self.child_nodes[move_idx].branch_complete = True
             if result_code == 1:
                 reward = 1.
+                # It's our turn and we won the game
+                self.game_won = True
             else:
                 reward = 0.
         else:
             reward = 0.
+
 
         # Update statistic
         return self.child_nodes[move_idx], reward, done
@@ -503,6 +538,10 @@ class Node:
         probs = N_to_tau / np.sum(N_to_tau)
         probs[self.Ns == 0] = 0 # Assert this... was occassioanlly getting an error in which it chooses unvisited
         chosen_move = np.random.choice(len(self.moves), p=probs)
+
+        if chosen_move not in self.child_nodes:
+            print(self.Ns, chosen_move, self.moves)
+
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
     def greedy_select_new_root_node(self):

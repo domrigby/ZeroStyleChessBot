@@ -86,11 +86,11 @@ class Memory:
         node = last_node
 
         while node.parent_datapont:
-
-            if node.player == winner:
-                last_node.win_val = 1
-            else:
-                last_node.win_val = -1
+            if winner is not None:
+                if node.player == winner:
+                    last_node.win_val = 1
+                else:
+                    last_node.win_val = -1
 
     def load_data(self, path: str = "neural_nets/data/games.pkl", sample_size: int = 100000):
         # Slow but we only do it once
