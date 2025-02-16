@@ -16,7 +16,7 @@ class TrainingProcess(Process):
     min_games_to_train = 100
 
     def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 64,
-                 min_num_batches_to_train: int = 32, num_agents: int = 1, data_queue: Queue = None):
+                 min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -49,6 +49,8 @@ class TrainingProcess(Process):
 
         self.last_update_time = time.time()
 
+        self.games_played = 0
+
     def set_experience_queue(self, experience_queue: Queue):
         self.experience_queue = experience_queue
 
@@ -63,10 +65,9 @@ class TrainingProcess(Process):
 
                 for _ in range(self.batch_size):
                     try:
-                        state, moves, visit_counts, predicted_value, game_over, agent_id, winner = queue.get_nowait()
-                        self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, game_over=game_over,
-                                                        agent_id=agent_id, winner=winner)
-                        
+                        game_states, agent_id = queue.get_nowait()
+                        self.memory.save_game_to_memory(game_states, agent_id)
+                        self.games_played += 1
                         print(f"Games played: {self.memory.games_played}")
                     except Empty:
                         break
@@ -90,10 +91,11 @@ class TrainingProcess(Process):
 
     def train_neural_network(self):
         """ Train the neural network using the experiences from the memory """
+
         if len(self.memory) < self.min_num_batches_to_train * self.batch_size:
             return
 
-        states, moves, probs, wins = self.memory.get_batch(32)
+        states, moves, probs, wins = self.memory.get_batch(self.batch_size)
         state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
         total_loss, value_loss, pol_loss = self.neural_net.loss_function(state, target=(wins, moves),
                                                                          legal_move_mask=legal_move_mask)

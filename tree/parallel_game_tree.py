@@ -5,9 +5,10 @@ import time
 from multiprocessing import Queue, Process
 from queue import Empty
 from typing import List, Dict
-from tree.memory import Memory
+from tree.memory import Memory, Turn
 import chess_moves
 import os
+from enum import Enum
 
 from util.parallel_error_log import error_logger
 from util.parallel_profiler import parallel_profile
@@ -15,6 +16,166 @@ from util.chess_functions import save_chess_board_as_im
 
 def all_custom(iterable):
     return len(iterable) > 0 and all(iterable)
+
+class GameOverType(Enum):
+    STALEMATE = 0
+    CHECKMATE = 1
+    NO_TAKES_DRAW = 2
+
+
+class Node:
+
+    def __init__(self, state: str , board: chess_moves.ChessEngine =None, parent_node =None):
+
+        # The chess fen string object representing this state
+        self.state: str = state
+        self.player: str = self.state.split()[1]
+
+        # Save a reference to the parent node
+        self.parent_node = parent_node  # Reference to the parent move
+
+        # Generate child nodes for legal moves
+        board.set_fen(self.state)
+        legal_moves =  board.legal_moves()
+        self.number_legal_moves = len(list(legal_moves))
+
+        # Check if we have fully searched the branch
+        if self.number_legal_moves == 0:
+            self.branch_complete_reason = 'No legal moves found'
+            self.branch_complete = True
+        else:
+            self.branch_complete = False
+
+        self.game_won = False
+        self.game_over_type: GameOverType = None
+
+        # Create edges
+        self.moves = legal_moves
+        self.Ws = np.zeros(len(self.moves))
+        self.Ns = np.zeros(len(self.moves))
+        self.Ps = np.zeros(len(self.moves))
+        self.virtual_losses = np.zeros(len(self.moves))
+        self.child_nodes: Dict[int, Node] = {}
+
+        # Save whose go it is
+        self.team = Turn.WHITE if self.state.split()[1] == 'w' else Turn.BLACK
+
+        # State value
+        self.V = 0
+
+        # Set a flag saying it has not been processed yet
+        self.branch_complete_reason: str = None
+        self.awaiting_processing: bool = False
+
+    def puct(self, draw_num: int = None, rng_generator: default_rng = None):
+        """
+        Select the best move using the PUCT formula,
+        ignoring moves that lead to completed branches.
+        """
+        if self.number_legal_moves == 1:
+            # Save some compute
+            return 0, self.moves[0]
+
+        branch_complete = np.zeros(len(self.moves), dtype=np.bool_)
+
+        for move_idx, child_node in self.child_nodes.items():
+            branch_complete[move_idx] = child_node.branch_complete
+
+        # Ignore completed branches
+        valid_moves = np.where(~branch_complete)[0]
+
+        if sum(valid_moves) == 0:
+            return None, None
+
+        # Use only valid moves in PUCT calculation
+        visits = np.sum(self.Ns[valid_moves])
+
+        Qs = self.Ws/self.Ns
+        Qs[self.Ns==0] = 0
+        Qs[~valid_moves] = -np.inf
+
+        puct_values = Qs + 3.0 * self.Ps * np.sqrt(visits + 1) / (self.Ns + 1)
+
+        # Select the move with the maximum PUCT value
+        best_value = np.max(puct_values)
+        best_indexes = np.where(puct_values == best_value)[0]
+
+        best_index = rng_generator.choice(best_indexes)
+
+        return best_index, self.moves[best_index]
+
+    def expand(self, move_idx: int, board: chess.Board, state: str):
+
+        if state is None:
+            state = board.fen()  # Update the board state to the provided FEN string
+
+        # Run the sim to update the board
+        new_state: str = board.push(state, self.moves[move_idx])
+
+        # Create a new child node
+        self.child_nodes[move_idx] = Node(new_state, board, parent_node=self)
+
+        # Calculate the reward
+        done, result_code = board.is_game_over()
+
+        if done:
+
+            print("\rEnd game found!", end="")
+            self.child_nodes[move_idx].branch_complete_reason = f'End game found in sim: {result_code}'
+            self.child_nodes[move_idx].branch_complete = True
+
+            # This corresponds to the output codes from chess engine
+            self.child_nodes[move_idx].game_over_type = GameOverType(result_code)
+
+            if result_code == 1:
+                reward = 1.
+                # It's our turn and we won the game
+                self.child_nodes[move_idx].game_won = True
+            else:
+                reward = 0.
+        else:
+            reward = 0.
+
+        # Update statistic
+        return self.child_nodes[move_idx], reward, done
+
+    def exploratory_select_new_root_node(self, tau: float = 1.0):
+        """
+        Select a random child node with a temperature adjusted probability distribution
+        :param tau:
+        :return:
+        """
+        N_to_tau = np.power(self.Ns, 1./tau)
+        probs = N_to_tau / np.sum(N_to_tau)
+        probs[self.Ns == 0] = 0 # Assert this... was occassioanlly getting an error in which it chooses unvisited
+        chosen_move = np.random.choice(len(self.moves), p=probs)
+
+        if chosen_move not in self.child_nodes:
+            print(self.Ns, chosen_move, self.moves)
+
+        return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
+
+    def greedy_select_new_root_node(self):
+        """
+        Select child node with the highest Q
+        :return:
+        """
+        Qs = self.Ws/self.Ns
+        legit_moves = self.Ns > 0
+        Qs[~legit_moves] = -np.inf
+        q_max = np.max(Qs)
+        max_idxs = np.where(Qs==q_max)[0]
+        chosen_move = np.random.choice(max_idxs)
+        return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
+
+    @property
+    def legal_move_strings(self):
+        return [str(move) for move in self.moves]
+
+    @property
+    def Qs(self):
+        return self.Ws/self.Ns
+
 
 class GameTree(Process):
 
@@ -164,11 +325,15 @@ class GameTree(Process):
                         # TODO: handle these better
                         self.undo_informationless_rollout(visited_moves)
 
+                # Save checkmates and stalemate games to memory. Got rid of no takes draws as they just spam the memory
+                # as quite often when you get close to 50 no takes there are tens of differnt possible games which lead
+                # a draw
+                if done and current_node.game_over_type != GameOverType.NO_TAKES_DRAW:
+                    # We have found a full game... save result to memory
+                    self.save_results_to_memory(current_node)
+
             # Now return to root node
             current_node = self.root
-
-        if self.training:
-            self.search_for_sufficiently_visited_nodes(self.root)
 
     @staticmethod
     def undo_informationless_rollout(visited_moves):
@@ -205,11 +370,7 @@ class GameTree(Process):
                 node.virtual_losses[move_idx] += 1
 
     def search_for_sufficiently_visited_nodes(self, root_node):
-
-        if self.save_non_root_states:
-            self.recursive_search(root_node, 0, root_node)
-        else:
-            self.save_results_to_memory(root_node)
+        self.recursive_search(root_node, 0, root_node)
 
     def recursive_search(self, node, count, root_node):
         """
@@ -219,7 +380,7 @@ class GameTree(Process):
         if node.branch_complete or count > 400:
             return
 
-        self.save_results_to_memory(node, root_node)
+        self.save_results_to_memory(node)
 
         for move_idx in range(len(node.moves)):
             if node.Ns[move_idx] >= 100 and move_idx in node.child_nodes:
@@ -227,26 +388,37 @@ class GameTree(Process):
 
         return
 
-    def save_results_to_memory(self, current_node):
+    def save_results_to_memory(self, current_node: Node):
 
-        state = current_node.state
-        moves = current_node.moves
-        visit_counts = current_node.Ns
-        predicted_value = current_node.V
-
-        self.saved_memory_local += 1
-
-        # See if the game has been won
-        winner = None
         if current_node.game_won:
-            winner = current_node.player
+            winner = current_node.parent_node.player
+        else:
+            winner = None
+
+        game_states = []
+
+        while current_node.parent_node is not None:
+
+            state = current_node.state
+            moves = current_node.moves
+            visit_counts = current_node.Ns
+
+            if winner is not None:
+                if current_node.player == winner:
+                    value = 1
+                else:
+                    value = -1
+            else:
+                value = 0
+
+            game_states.append({'state': state, 'moves': moves, 'visit_counts': visit_counts, 'value': value})
+            self.saved_memory_local += 1
+            current_node = current_node.parent_node
 
         if not self.multiprocess:
-            self.memory.save_state_to_moves(state, moves, visit_counts, predicted_value, current_node.branch_complete,
-                                            self.agent_id, winner)
+            self.memory.save_game_to_memory((game_states, self.agent_id))
         else:
-            self.experience_queue.put((state, moves, visit_counts, predicted_value, current_node.branch_complete,
-                                       self.agent_id, winner))
+            self.experience_queue.put((game_states, self.agent_id))
 
     def apply_neural_net_results(self):
         """
@@ -417,150 +589,3 @@ class GameTree(Process):
         self.data_queue.put_nowait(game_data_dict)
 
 
-class Node:
-
-    def __init__(self, state: str , board: chess_moves.ChessEngine =None, parent_node =None):
-
-        # The chess fen string object representing this state
-        self.state: str = state
-        self.player: str = self.state.split()[1]
-
-        # Save a reference to the parent node
-        self.parent_node = parent_node  # Reference to the parent move
-
-        # Generate child nodes for legal moves
-        board.set_fen(self.state)
-        legal_moves =  board.legal_moves()
-        self.number_legal_moves = len(list(legal_moves))
-
-        # Check if we have fully searched the branch
-        if self.number_legal_moves == 0:
-            self.branch_complete_reason = 'No legal moves found'
-            self.branch_complete = True
-        else:
-            self.branch_complete = False
-
-        self.game_won = False
-
-        # Create edges
-        self.moves = legal_moves
-        self.Ws = np.zeros(len(self.moves))
-        self.Ns = np.zeros(len(self.moves))
-        self.Ps = np.zeros(len(self.moves))
-        self.virtual_losses = np.zeros(len(self.moves))
-        self.child_nodes: Dict[int, Node] = {}
-
-        # Save whose go it is
-        self.team = "white" if self.state.split()[1] == 'w' else "black"
-
-        # State value
-        self.V = 0
-
-        # Set a flag saying it has not been processed yet
-        self.branch_complete_reason: str = None
-        self.awaiting_processing: bool = False
-
-    def puct(self, draw_num: int = None, rng_generator: default_rng = None):
-        """
-        Select the best move using the PUCT formula,
-        ignoring moves that lead to completed branches.
-        """
-        if self.number_legal_moves == 1:
-            # Save some compute
-            return 0, self.moves[0]
-
-        branch_complete = np.zeros(len(self.moves), dtype=np.bool_)
-
-        for move_idx, child_node in self.child_nodes.items():
-            branch_complete[move_idx] = child_node.branch_complete
-
-        # Ignore completed branches
-        valid_moves = np.where(~branch_complete)[0]
-
-        if sum(valid_moves) == 0:
-            return None, None
-
-        # Use only valid moves in PUCT calculation
-        visits = np.sum(self.Ns[valid_moves])
-
-        Qs = self.Ws/self.Ns
-        Qs[self.Ns==0] = 0
-        Qs[~valid_moves] = -np.inf
-
-        puct_values = Qs + 3.0 * self.Ps * np.sqrt(visits + 1) / (self.Ns + 1)
-
-        # Select the move with the maximum PUCT value
-        best_value = np.max(puct_values)
-        best_indexes = np.where(puct_values == best_value)[0]
-
-        best_index = rng_generator.choice(best_indexes)
-
-        return best_index, self.moves[best_index]
-
-    def expand(self, move_idx: int, board: chess.Board, state: str):
-
-        if state is None:
-            state = board.fen()  # Update the board state to the provided FEN string
-
-        # Run the sim to update the board
-        new_state: str = board.push(state, self.moves[move_idx])
-
-        # Create a new child node
-        self.child_nodes[move_idx] = Node(new_state, board, parent_node=self)
-
-        # Calculate the reward
-        done, result_code = board.is_game_over()
-
-        if done:
-            print("\rEnd game found!", end="")
-            self.child_nodes[move_idx].branch_complete_reason = f'End game found in sim: {result_code}'
-            self.child_nodes[move_idx].branch_complete = True
-            if result_code == 1:
-                reward = 1.
-                # It's our turn and we won the game
-                self.game_won = True
-            else:
-                reward = 0.
-        else:
-            reward = 0.
-
-
-        # Update statistic
-        return self.child_nodes[move_idx], reward, done
-
-    def exploratory_select_new_root_node(self, tau: float = 1.0):
-        """
-        Select a random child node with a temperature adjusted probability distribution
-        :param tau:
-        :return:
-        """
-        N_to_tau = np.power(self.Ns, 1./tau)
-        probs = N_to_tau / np.sum(N_to_tau)
-        probs[self.Ns == 0] = 0 # Assert this... was occassioanlly getting an error in which it chooses unvisited
-        chosen_move = np.random.choice(len(self.moves), p=probs)
-
-        if chosen_move not in self.child_nodes:
-            print(self.Ns, chosen_move, self.moves)
-
-        return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
-
-    def greedy_select_new_root_node(self):
-        """
-        Select child node with the highest Q
-        :return:
-        """
-        Qs = self.Ws/self.Ns
-        legit_moves = self.Ns > 0
-        Qs[~legit_moves] = -np.inf
-        q_max = np.max(Qs)
-        max_idxs = np.where(Qs==q_max)[0]
-        chosen_move = np.random.choice(max_idxs)
-        return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
-
-    @property
-    def legal_move_strings(self):
-        return [str(move) for move in self.moves]
-
-    @property
-    def Qs(self):
-        return self.Ws/self.Ns

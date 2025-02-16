@@ -46,28 +46,34 @@ class Memory:
     def __len__(self):
         return len(self.data)
 
-    def save_state_to_moves(self, state: str, observed_moves: List[str], visits: List[int], value: float = 0.,
-                            game_over: bool = False, agent_id: int = 0, winner: str = None):
+    def save_game_to_memory(self, game, agent_id):
+        """
+        Create a sequence of data points
+        :param game:
+        :param agent_id:
+        :return:
+        """
 
-        moves: List[str] = []
-        probs: List[float] = []
+        parent_move = None
 
-        total = np.sum(visits)
-        for move, count in zip(observed_moves, visits):
-            moves.append(move)
-            probs.append(count/total)
+        for idx, game_state in enumerate(game):
 
-        data_point = DataPoint(state, moves, probs, value, self.last_moves[agent_id])
+            state = game_state['state']
+            observed_moves = game_state['moves']
+            visits = game_state['visit_counts']
+            value = game_state['value']
 
-        if not game_over:
-            self.last_moves[agent_id] = data_point
-        else:
-            if winner is not None:
-                self.end_game(data_point, winner)
-            self.last_moves[agent_id] = None
-            self.games_played += 1
+            moves: List[str] = []
+            probs: List[float] = []
 
-        self.data.append(data_point)
+            total = np.sum(visits)
+            for move, count in zip(observed_moves, visits):
+                moves.append(move)
+                probs.append(count/total)
+
+            data_point = DataPoint(state, moves, probs, value, parent_move)
+            self.data.append(data_point)
+            parent_move = data_point
 
     def get_batch(self, batch_size: int = 32):
 
