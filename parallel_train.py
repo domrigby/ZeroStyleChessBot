@@ -21,7 +21,7 @@ if __name__ == "__main__":
     NUM_TRAINERS = 1
     NUM_AGENTS = 3
 
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.001)
     chess_net.share_memory()
 
     agents, evaluators, trainers, data_queues_dicts = create_agents(NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS, chess_net)

@@ -102,23 +102,7 @@ class Memory:
         # Slow but we only do it once
         with open(path, "rb") as f:
             moves = pkl.load(f)
-
-        moves = np.random.choice(moves, sample_size)
-
-        for idx, move in enumerate(moves):
-            probs = []
-            for legal_move in move['legal_moves']:
-                if legal_move == move['move']:
-                    probs.append(1.)
-                else:
-                    probs.append(0.)
-
-            data_point = DataPoint(move['fen'], move['legal_moves'], probs)
-
-            if len(self.data) < sample_size:
-                self.data.append(data_point)
-            else:
-                self.data[idx] = data_point
+        self.data = moves
 
     def save_data(self):
         with open('new_data.pkl', 'wb') as f:

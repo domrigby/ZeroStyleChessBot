@@ -9,6 +9,7 @@ from tree.memory import Memory, Turn
 import chess_moves
 import os
 from enum import Enum
+import time
 
 from util.parallel_error_log import error_logger
 from util.parallel_profiler import parallel_profile
@@ -151,7 +152,7 @@ class Node:
         chosen_move = np.random.choice(len(self.moves), p=probs)
 
         if chosen_move not in self.child_nodes:
-            print(self.Ns, chosen_move, self.moves)
+            print(self.Ns, chosen_move, self.moves, self.child_nodes, probs)
 
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
@@ -220,11 +221,12 @@ class GameTree(Process):
 
         # Initiate root
         self.root = None
+        self.time_waiting = 0.
 
     def reset(self):
         self.root = Node(state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", board=chess_moves.ChessEngine())
 
-    def parallel_search(self, current_node = None, number_of_expansions: int = 1000):
+    def parallel_search(self, current_node: Node = None, number_of_expansions: int = 1000):
 
         if current_node is None:
             current_node = self.root
@@ -263,6 +265,7 @@ class GameTree(Process):
                     # We have found a leaf move
                     move_has_child_node = False
 
+                pre_check_time = time.perf_counter_ns()
                 # Check for bottleneck conditions: despite virtual loss we have reached a state in which all moves are awaiting processing
                 if self.multiprocess and all_custom([move_idx in current_node.child_nodes and current_node.child_nodes[move_idx].awaiting_processing
                                      and not current_node.branch_complete for move_idx in range(len(current_node.moves))]):
@@ -277,6 +280,8 @@ class GameTree(Process):
                 # actual call to finish off
                 while self.multiprocess and self.process_queue.qsize() > 128:
                     self.apply_neural_net_results()
+
+                self.time_waiting += (time.perf_counter_ns() - pre_check_time) / 1e9
 
                 if not self.multiprocess and self.training and idx % 30 == 0:
                     self.train_neural_network_local()
@@ -328,7 +333,7 @@ class GameTree(Process):
                 # Save checkmates and stalemate games to memory. Got rid of no takes draws as they just spam the memory
                 # as quite often when you get close to 50 no takes there are tens of differnt possible games which lead
                 # a draw
-                if done and current_node.game_over_type != GameOverType.NO_TAKES_DRAW:
+                if self.training and done and current_node.game_over_type != GameOverType.NO_TAKES_DRAW:
                     # We have found a full game... save result to memory
                     self.save_results_to_memory(current_node)
 
@@ -396,6 +401,9 @@ class GameTree(Process):
             winner = None
 
         game_states = []
+
+        # Traverse up the tree and save game states, visit counts, and values
+        current_node = current_node.parent_node
 
         while current_node.parent_node is not None:
 
@@ -476,6 +484,16 @@ class GameTree(Process):
         state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
         self.neural_net.loss_function(state, target=(wins, moves), legal_move_mask=legal_move_mask)
 
+    def update_node_in_training(self, new_node: Node, action: int):
+        """
+        In training, we remember old visited states to update when we finish games
+        """
+        # Clear references to other parts of tree
+        self.root.child_nodes = {action: new_node}
+
+        # Update root node
+        self.root = new_node
+
     def end_game(self, white_win: bool):
         self.memory.end_game(white_win)
 
@@ -507,7 +525,9 @@ class GameTree(Process):
                 self.parallel_search(current_node=node, number_of_expansions=sims)
                 end_time = time.time()
 
-                print(f"\n\nTime with parallel search {end_time - start_time:.3f}")
+                print(f"\n\nTime with parallel search {end_time - start_time:.3f}s. {self.time_waiting:.3f} "
+                      f"({100. *self.time_waiting / (end_time - start_time)}%) spent waiting)")
+                self.time_waiting = 0.
 
                 # TODO: sort out now visiting
 
@@ -556,16 +576,12 @@ class GameTree(Process):
                     if main_board.is_check():
                         print("King is in check!")
 
-                    self.root = node
-
-                    # Clear references to the tree above
-                    self.root.parent_move = None
+                    self.update_node_in_training(node, move_idx)
 
                     # Increment move count
                     move_count += 1
 
                 if self.root.branch_complete:
-                    # TODO... this causes a problem
                     self.save_results_to_memory(self.root)
                     break
 

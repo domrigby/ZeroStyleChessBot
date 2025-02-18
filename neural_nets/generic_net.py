@@ -34,7 +34,7 @@ def check_input(func):
 
 class GenericNet(nn.Module):
 
-    def __init__(self, input_size: tuple, output_size: tuple, init_lr: float = 0.001, save_dir: str = 'networks'):
+    def __init__(self, input_size: tuple, output_size: tuple, init_lr: float = 0.0001, save_dir: str = 'networks'):
 
         # Initialise nn Module
         super().__init__()

@@ -79,7 +79,7 @@ class ChessNet(GenericNet):
     def loss_function(self, input: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None, training: bool = True):
 
         target_value, target_policy = target
-        target_value, target_policy = target_value.to(self.device), target_policy.to(self.device)
+        target_value, target_policy = target_value.to(self.device, non_blocking=True), target_policy.to(self.device, non_blocking=True)
 
         # Predicted value
         predicted_value, predicted_policy = self(input, legal_move_mask)
@@ -93,12 +93,14 @@ class ChessNet(GenericNet):
 
         total_loss = value_loss + policy_loss
 
+        if torch.isnan(total_loss):
+            print("here!")
+
         # Step the weights
         if training:
             self.optimiser.zero_grad()
             total_loss.backward()
             self.optimiser.step()
-
 
         return total_loss, value_loss, policy_loss
 

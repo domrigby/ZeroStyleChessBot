@@ -27,3 +27,8 @@ There are two training modes:
 ## Inference
 Playing against the machine is still a pending change. It can perform self-play using ```chess_bot.py```
 
+## Write Up Pending
+I am planning to do a write-up on this soon. It will include what I learnt parallelisation and PyTorch 
+optimisation.
+
+I also intend to add a PyGame based play mode such that anyone can take it on.

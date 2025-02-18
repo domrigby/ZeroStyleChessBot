@@ -13,10 +13,10 @@ from util.parallel_error_log import error_logger
 
 class TrainingProcess(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
-    min_games_to_train = 100
+    min_games_to_train = 1000
 
-    def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 64,
-                 min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None):
+    def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 32,
+                 min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None, load_path: str = None):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -39,7 +39,7 @@ class TrainingProcess(Process):
 
         self.neural_net = neural_net
 
-        self.memory = Memory(100000, num_agents=num_agents)
+        self.memory = Memory(100000, num_agents=num_agents, preload_data=load_path)
 
         self.update_period = 25
 
@@ -68,12 +68,11 @@ class TrainingProcess(Process):
                         game_states, agent_id = queue.get_nowait()
                         self.memory.save_game_to_memory(game_states, agent_id)
                         self.games_played += 1
-                        print(f"Games played: {self.memory.games_played}")
+                        print(f"Games played: {self.games_played}")
                     except Empty:
                         break
 
-            # Ensure we have enough diverse enough data to train
-            if self.memory.games_played >= self.min_games_to_train:
+            if self.games_played >= self.min_games_to_train:
                 self.train_neural_network()
 
             if len(self.memory.data) % 1000 == 0 and len(self.memory.data) > 0:
@@ -100,9 +99,9 @@ class TrainingProcess(Process):
         total_loss, value_loss, pol_loss = self.neural_net.loss_function(state, target=(wins, moves),
                                                                          legal_move_mask=legal_move_mask)
 
-        self.value_loss_window[self.training_count // self.update_period] = value_loss
-        self.pol_loss_window[self.training_count // self.update_period] = pol_loss
-        self.total_loss_window[self.training_count // self.update_period] = total_loss
+        self.value_loss_window[self.training_count % self.update_period] = value_loss
+        self.pol_loss_window[self.training_count % self.update_period] = pol_loss
+        self.total_loss_window[self.training_count % self.update_period] = total_loss
 
         if (self.training_count - 1) % self.update_period == 0:
 
@@ -124,3 +123,16 @@ class TrainingProcess(Process):
 
     def stop(self):
         self.running = False
+
+if __name__ == "__main__":
+    from multiprocessing import Queue
+
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.001)
+    training_data_queue = Queue()
+
+    trainer = TrainingProcess(save_dir="", neural_net=chess_net, experience_queues=[Queue()], batch_size=128,
+                              num_agents=1, data_queue=Queue(), load_path="/home/dom/Code/chess_bot/new_data.pkl")
+
+    trainer.games_played = 100000
+
+    trainer.run()

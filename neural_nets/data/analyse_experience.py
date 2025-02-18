@@ -3,9 +3,8 @@ import numpy as np
 import glob
 import matplotlib.pyplot as plt
 
-with open("/home/dom/Code/chess_bot/new_data_long_run.pkl", 'rb') as f:
+with open("/home/dom/Code/chess_bot/new_data.pkl", 'rb') as f:
     data = pickle.load(f)
-
 
 values = np.zeros(len(data))
 for idx, data_point in enumerate(data):

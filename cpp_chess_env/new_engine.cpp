@@ -1233,7 +1233,6 @@ private:
         moves.push_back(move);
     }
 
-
 public:
     // Add this method to expose the board as a 2D vector
     std::vector<std::vector<char>> get_board() const {
