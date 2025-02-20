@@ -10,6 +10,7 @@ import chess_moves
 import os
 from enum import Enum
 import time
+from numba import njit
 
 from util.parallel_error_log import error_logger
 from util.parallel_profiler import parallel_profile
@@ -91,8 +92,8 @@ class Node:
         # Use only valid moves in PUCT calculation
         visits = np.sum(self.Ns[valid_moves])
 
-        Qs = self.Ws/self.Ns
-        Qs[self.Ns==0] = 0
+        Qs = self.Ws / self.Ns
+        Qs[self.Ns == 0] = 0
         Qs[~valid_moves] = -np.inf
 
         puct_values = Qs + 3.0 * self.Ps * np.sqrt(visits + 1) / (self.Ns + 1)
@@ -121,7 +122,6 @@ class Node:
 
         if done:
 
-            print("\rEnd game found!", end="")
             self.child_nodes[move_idx].branch_complete_reason = f'End game found in sim: {result_code}'
             self.child_nodes[move_idx].branch_complete = True
 
@@ -129,7 +129,7 @@ class Node:
             self.child_nodes[move_idx].game_over_type = GameOverType(result_code)
 
             if result_code == 1:
-                reward = 1.
+                reward = -1.
                 # It's our turn and we won the game
                 self.child_nodes[move_idx].game_won = True
             else:
@@ -152,7 +152,8 @@ class Node:
         chosen_move = np.random.choice(len(self.moves), p=probs)
 
         if chosen_move not in self.child_nodes:
-            print(self.Ns, chosen_move, self.moves, self.child_nodes, probs)
+            with open(f'game_tree_debug.txt', 'a') as f:
+                f.write(f"{self.Ns} {chosen_move} {self.moves} {self.child_nodes} {probs}")
 
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
@@ -270,9 +271,6 @@ class GameTree(Process):
                 if self.multiprocess and all_custom([move_idx in current_node.child_nodes and current_node.child_nodes[move_idx].awaiting_processing
                                      and not current_node.branch_complete for move_idx in range(len(current_node.moves))]):
 
-                    print(f"\rBOTTLENECK WARNING: Queue size: {self.process_queue.qsize()} "
-                          f"{[current_node.child_nodes[move_idx].awaiting_processing for move_idx in range(len(current_node.moves))]}")
-
                     while all_custom([current_node.child_nodes[move_idx].awaiting_processing for move_idx in range(len(current_node.moves))]):
                         self.apply_neural_net_results()
 
@@ -311,6 +309,10 @@ class GameTree(Process):
 
                 else:
 
+                    if reward != 0:
+                        # Send reward signal up the tree
+                        self.backpropagation(visited_moves, reward, undo_v_loss=False)
+
                     # Create a hash of the node such that we can relocate this node later
                     node_hash = hash(current_node)
 
@@ -347,7 +349,7 @@ class GameTree(Process):
             node.Ns[move_idx] -= 1
             node.virtual_losses[move_idx] += 1
 
-    def backpropagation(self, visited_moves, observed_reward: float):
+    def backpropagation(self, visited_moves, observed_reward: float, undo_v_loss: bool = True):
 
         gamma_factor = 1
 
@@ -371,7 +373,7 @@ class GameTree(Process):
 
             node.Ws[move_idx] += new_Q
 
-            if self.multiprocess:
+            if self.multiprocess and undo_v_loss:
                 node.virtual_losses[move_idx] += 1
 
     def search_for_sufficiently_visited_nodes(self, root_node):
@@ -472,7 +474,7 @@ class GameTree(Process):
                     node.Ps[move_idx] = prob
 
                 node.awaiting_processing = False
-                self.backpropagation(visited_moves, (value + reward)/2)
+                self.backpropagation(visited_moves, value)
                 batch_processed = True
 
         return batch_processed
@@ -517,7 +519,7 @@ class GameTree(Process):
             self.reset()
 
             node = self.root
-            winner = None
+            player_check_mated = None
 
             while not main_board.is_game_over():
 
@@ -541,16 +543,15 @@ class GameTree(Process):
                 main_board.set_fen(self.root.state)
                 main_board.push(chess_move)
 
-                print(f"Agent {self.agent_id} Game {game_count} Move: {move_count}")
-                print("Board:")
-                print(main_board)
-
-                print(f"FEN String: {main_board.fen()}")
+                # print(f"Agent {self.agent_id} Game {game_count} Move: {move_count}")
+                # print("Board:")
+                # print(main_board)
+                #
+                # print(f"FEN String: {main_board.fen()}")
 
                 if main_board.is_checkmate():
 
-                    print("Checkmate!")
-                    winner = main_board.fen().split()[1]
+                    player_check_mated = main_board.fen().split()[1]
 
                     if self.save_images_of_checkmates:
                         save_chess_board_as_im(main_board, f"{self.save_dir}/agent_{self.agent_id}_game_{game_count}.svg",
@@ -567,11 +568,11 @@ class GameTree(Process):
                     break
                 else:
 
-                    print(
-                        f"Move chosen: {move} Prob: {node.parent_node.Ps[move_idx]:.3f} Q: {node.parent_node.Qs[move_idx]:.3f} N: {node.parent_node.Ns[move_idx]}")
-                    print(f"Game over: {main_board.is_game_over()}")
-                    print(f"Memory length: {self.saved_memory_local} Process queue: {self.process_queue.qsize()} Results queue: {self.results_queue.qsize()}")
-                    print(f"Tree node complete: {node.branch_complete} Reason: {node.branch_complete_reason}")
+                    # print(
+                    #     f"Move chosen: {move} Prob: {node.parent_node.Ps[move_idx]:.3f} Q: {node.parent_node.Qs[move_idx]:.3f} N: {node.parent_node.Ns[move_idx]}")
+                    # print(f"Game over: {main_board.is_game_over()}")
+                    # print(f"Memory length: {self.saved_memory_local} Process queue: {self.process_queue.qsize()} Results queue: {self.results_queue.qsize()}")
+                    # print(f"Tree node complete: {node.branch_complete} Reason: {node.branch_complete_reason}")
 
                     if main_board.is_check():
                         print("King is in check!")
@@ -585,10 +586,10 @@ class GameTree(Process):
                     self.save_results_to_memory(self.root)
                     break
 
-            if winner == 'w':
-                white_win = True
-            elif winner == 'b':
+            if player_check_mated == 'w':
                 white_win = False
+            elif player_check_mated == 'b':
+                white_win = True
             else:
                 white_win = None
 

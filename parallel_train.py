@@ -51,8 +51,9 @@ if __name__ == "__main__":
                 new_data_point = queue.get_nowait()
 
                 if 'total_loss' in new_data_point:
-                    monitor.update_losses(new_data_point['total_loss'], new_data_point['value_loss'],
-                                        new_data_point['policy_loss'])
+                    if new_data_point['total_loss'] != 0:
+                        monitor.update_losses(new_data_point['total_loss'], new_data_point['value_loss'],
+                                            new_data_point['policy_loss'])
 
                 if 'experience_length' in new_data_point:
                     monitor.update_experience(new_data_point['experience_length'])

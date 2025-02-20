@@ -8,7 +8,7 @@ import numpy as np
 import time
 import os.path
 from util.parallel_error_log import error_logger
-
+from datetime import datetime
 
 
 class TrainingProcess(Process):
@@ -23,6 +23,7 @@ class TrainingProcess(Process):
         """
         super().__init__()
 
+        self.save_dir = save_dir
         self.log_file_name = os.path.join(save_dir, f"{self.__class__.__name__}.txt")
 
         self.experience_queue = experience_queues
@@ -35,7 +36,7 @@ class TrainingProcess(Process):
         self.running = True
 
         self.batch_size = batch_size
-        self.min_num_batches_to_train = min_num_batches_to_train
+        self.min_num_batches_to_train = 10 #min_num_batches_to_train
 
         self.neural_net = neural_net
 
@@ -59,7 +60,7 @@ class TrainingProcess(Process):
 
         # If there are states in the qy
 
-        while self.running:
+        while True:
 
             for queue in self.experience_queue:
 
@@ -75,18 +76,27 @@ class TrainingProcess(Process):
             if self.games_played >= self.min_games_to_train:
                 self.train_neural_network()
 
-            if len(self.memory.data) % 1000 == 0 and len(self.memory.data) > 0:
-                self.memory.save_data()
-
-            if self.training_count % 1000 == 0:
-                self.neural_net.save_network(f'networks/RL_tuned_{self.training_count}.pt')
-
             time_now = time.time()
 
             if time_now - self.last_update_time > self.update_period and self.data_queue is not None:
-                new_data = {'experience_length': len(self.memory.data)}
+
+                new_data = {'experience_length': len(self.memory.data),
+                            'total_loss': self.total_loss_window.mean(),
+                            'value_loss': self.value_loss_window.mean(),
+                            'policy_loss': self.pol_loss_window.mean()}
+
                 self.data_queue.put_nowait(new_data)
+
                 self.last_update_time = time_now
+                self.memory.save_data()
+                self.neural_net.save_network(f'networks/RL_tuned_{self.training_count}.pt')
+
+                with open(self.save_dir+'/debug.txt', 'w') as f:
+                    now = datetime.now()
+                    f.write(f'Still alive at time: {now.strftime("%m/%d/%Y, %H:%M:%S")}\n')
+                    f.write(f'experiencel length: {len(self.memory.data):.3f} total_loss: {self.total_loss_window.mean():.3f}\n'
+                            f'value_loss: {self.value_loss_window.mean():.3f} policy_loss: {self.pol_loss_window.mean():.5f}\n')
+
 
     def train_neural_network(self):
         """ Train the neural network using the experiences from the memory """
@@ -102,19 +112,6 @@ class TrainingProcess(Process):
         self.value_loss_window[self.training_count % self.update_period] = value_loss
         self.pol_loss_window[self.training_count % self.update_period] = pol_loss
         self.total_loss_window[self.training_count % self.update_period] = total_loss
-
-        if (self.training_count - 1) % self.update_period == 0:
-
-            # Send data back to the main core
-            data_dict = {'total_loss': self.total_loss_window.mean(),
-                         'value_loss': self.value_loss_window.mean(),
-                         'policy_loss': self.pol_loss_window.mean()}
-
-            self.data_queue.put_nowait(data_dict)
-
-            self.value_loss_window = np.zeros(self.update_period)
-            self.pol_loss_window = np.zeros(self.update_period)
-            self.total_loss_window = np.zeros(self.update_period)
 
         self.training_count += 1
 

@@ -37,9 +37,9 @@ if __name__ == '__main__':
     # Set the neural network parameters to be shared
     chess_net.share_memory()
 
-    trainer = TrainingProcess(neural_net=chess_net, experience_queues=[experience_queue], batch_size=128)
+    trainer = TrainingProcess("", neural_net=chess_net, experience_queues=[experience_queue], batch_size=128)
 
-    tree = GameTree(training=True, multiprocess=True,
+    tree = GameTree("", training=True, multiprocess=True,
                     experience_queue=experience_queue, process_queue=process_queue, results_queue=results_queue)
 
     for _ in range(NUM_EVALUATORS):
