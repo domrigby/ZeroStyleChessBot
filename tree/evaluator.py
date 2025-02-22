@@ -72,7 +72,6 @@ class NeuralNetHandling(Process):
 
         if not hashes:
             return
-            # continue  # Skip inference if nothing was processed
 
         # Tensorization & Inference
         state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)

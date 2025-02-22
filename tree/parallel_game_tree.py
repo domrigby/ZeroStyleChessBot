@@ -24,6 +24,27 @@ class GameOverType(Enum):
     CHECKMATE = 1
     NO_TAKES_DRAW = 2
 
+@njit(cache=True)
+def fast_puct(Ws, Ns, Ps):
+    """ numba compatible puct function. Outside class to only compile once"""
+
+    visits = np.sum(Ns)
+
+    Qs = Ws / Ns
+    Qs[Ns == 0] = 0
+
+    puct_values = Qs + 3.0 * Ps * np.sqrt(visits + 1) / (Ns + 1)
+
+    best_value = np.max(puct_values)
+    best_indexes = np.where(puct_values == best_value)[0]
+
+    best_index = best_indexes[np.random.randint(len(best_indexes))]
+
+    if best_index is None:
+        print(Qs)
+
+    return best_index
+
 
 class Node:
 
@@ -39,7 +60,7 @@ class Node:
         # Generate child nodes for legal moves
         board.set_fen(self.state)
         legal_moves =  board.legal_moves()
-        self.number_legal_moves = len(list(legal_moves))
+        self.number_legal_moves = len(legal_moves)
 
         # Check if we have fully searched the branch
         if self.number_legal_moves == 0:
@@ -53,10 +74,10 @@ class Node:
 
         # Create edges
         self.moves = legal_moves
-        self.Ws = np.zeros(len(self.moves))
-        self.Ns = np.zeros(len(self.moves))
-        self.Ps = np.zeros(len(self.moves))
-        self.virtual_losses = np.zeros(len(self.moves))
+        self.Ws = np.zeros(self.number_legal_moves)
+        self.Ns = np.zeros(self.number_legal_moves)
+        self.Ps = np.ones(self.number_legal_moves) / self.number_legal_moves
+        self.virtual_losses = np.zeros(self.number_legal_moves)
         self.child_nodes: Dict[int, Node] = {}
 
         # Save whose go it is
@@ -69,42 +90,12 @@ class Node:
         self.branch_complete_reason: str = None
         self.awaiting_processing: bool = False
 
+
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
-        """
-        Select the best move using the PUCT formula,
-        ignoring moves that lead to completed branches.
-        """
         if self.number_legal_moves == 1:
-            # Save some compute
-            return 0, self.moves[0]
-
-        branch_complete = np.zeros(len(self.moves), dtype=np.bool_)
-
-        for move_idx, child_node in self.child_nodes.items():
-            branch_complete[move_idx] = child_node.branch_complete
-
-        # Ignore completed branches
-        valid_moves = np.where(~branch_complete)[0]
-
-        if sum(valid_moves) == 0:
-            return None, None
-
-        # Use only valid moves in PUCT calculation
-        visits = np.sum(self.Ns[valid_moves])
-
-        Qs = self.Ws / self.Ns
-        Qs[self.Ns == 0] = 0
-        Qs[~valid_moves] = -np.inf
-
-        puct_values = Qs + 3.0 * self.Ps * np.sqrt(visits + 1) / (self.Ns + 1)
-
-        # Select the move with the maximum PUCT value
-        best_value = np.max(puct_values)
-        best_indexes = np.where(puct_values == best_value)[0]
-
-        best_index = rng_generator.choice(best_indexes)
-
-        return best_index, self.moves[best_index]
+            return 0
+        move_idx  = fast_puct(self.Ws, self.Ns, self.Ps)
+        return move_idx
 
     def expand(self, move_idx: int, board: chess.Board, state: str):
 
@@ -148,12 +139,14 @@ class Node:
         """
         N_to_tau = np.power(self.Ns, 1./tau)
         probs = N_to_tau / np.sum(N_to_tau)
-        probs[self.Ns == 0] = 0 # Assert this... was occassioanlly getting an error in which it chooses unvisited
+        probs[self.Ns == 0] = 0 # Assert this... was occasionly getting an error in which it chooses unvisited
         chosen_move = np.random.choice(len(self.moves), p=probs)
 
-        if chosen_move not in self.child_nodes:
+        while chosen_move not in self.child_nodes:
+            # Ultimate temporary bodge
             with open(f'game_tree_debug.txt', 'a') as f:
-                f.write(f"{self.Ns} {chosen_move} {self.moves} {self.child_nodes} {probs}")
+                f.write(f"{self.state} {self.Ns} {chosen_move} {self.moves} {self.child_nodes} {probs}\n")
+            chosen_move = np.random.choice(list(self.child_nodes.keys()))
 
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
@@ -226,6 +219,7 @@ class GameTree(Process):
 
     def reset(self):
         self.root = Node(state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", board=chess_moves.ChessEngine())
+        # self.root = Node(state="8/1k6/8/1K6/3r4/8/8/8 w - - 24 151", board=chess_moves.ChessEngine())
 
     def parallel_search(self, current_node: Node = None, number_of_expansions: int = 1000):
 
@@ -248,7 +242,7 @@ class GameTree(Process):
             while move_has_child_node and not current_node.branch_complete:
 
                 # Select
-                move_idx, new_move = current_node.puct(rng_generator=thread_rng)
+                move_idx = current_node.puct(rng_generator=thread_rng)
                 visited_moves.append([current_node, move_idx])
 
                 # Statistics
@@ -528,7 +522,7 @@ class GameTree(Process):
                 end_time = time.time()
 
                 print(f"\n\nTime with parallel search {end_time - start_time:.3f}s. {self.time_waiting:.3f} "
-                      f"({100. *self.time_waiting / (end_time - start_time)}%) spent waiting)")
+                      f"({100. *self.time_waiting / (end_time - start_time):.3f}%) spent waiting)")
                 self.time_waiting = 0.
 
                 # TODO: sort out now visiting
