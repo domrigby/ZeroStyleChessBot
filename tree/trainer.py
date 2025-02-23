@@ -40,7 +40,7 @@ class TrainingProcess(Process):
 
         self.neural_net = neural_net
 
-        self.memory = Memory(100000, num_agents=num_agents, preload_data=load_path)
+        self.memory = Memory(1000000, num_agents=num_agents, preload_data=load_path)
 
         self.update_period = 25
 

@@ -6,13 +6,15 @@ from tree.parallel_game_tree import GameTree
 from tree.evaluator import NeuralNetHandling
 from tree.trainer import TrainingProcess
 
-def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True):
+def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True,
+                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
     """
     This function initialises all the agents and strings and distributes the queues accordingly
     :param num_agents: number of agents
     :param num_evaluators: number of evaluators
     :param num_trainers: number of trainers
     :param network: the neural network being used
+    :param start_state
     :return:
     """
 
@@ -51,7 +53,8 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
             training_queue = None
 
         agent = GameTree(save_dir=folder_name, training=training, multiprocess=True, process_queue=process_queue,
-                         experience_queue=training_queue, results_queue=results_queue, data_queue=agent_data_queue)
+                         experience_queue=training_queue, results_queue=results_queue, data_queue=agent_data_queue,
+                         start_state=start_state)
 
         agents.append(agent)
         results_queue_dicts[agent.agent_id] = results_queue

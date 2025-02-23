@@ -25,12 +25,12 @@ class GameOverType(Enum):
     NO_TAKES_DRAW = 2
 
 @njit(cache=True)
-def fast_puct(Ws, Ns, Ps):
+def fast_puct(Ws, Ns, Ps, virtual_losses):
     """ numba compatible puct function. Outside class to only compile once"""
 
     visits = np.sum(Ns)
 
-    Qs = Ws / Ns
+    Qs = ( Ws / Ns ) + virtual_losses
     Qs[Ns == 0] = 0
 
     puct_values = Qs + 3.0 * Ps * np.sqrt(visits + 1) / (Ns + 1)
@@ -85,16 +85,17 @@ class Node:
 
         # State value
         self.V = 0
+        self.R = 0
 
         # Set a flag saying it has not been processed yet
         self.branch_complete_reason: str = None
         self.awaiting_processing: bool = False
 
-
     def puct(self, draw_num: int = None, rng_generator: default_rng = None):
         if self.number_legal_moves == 1:
             return 0
-        move_idx  = fast_puct(self.Ws, self.Ns, self.Ps)
+
+        move_idx  = fast_puct(self.Ws, self.Ns, self.Ps, self.virtual_losses)
         return move_idx
 
     def expand(self, move_idx: int, board: chess.Board, state: str):
@@ -128,6 +129,9 @@ class Node:
         else:
             reward = 0.
 
+        # Save the reward
+        self.child_nodes[move_idx].R = reward
+
         # Update statistic
         return self.child_nodes[move_idx], reward, done
 
@@ -141,12 +145,6 @@ class Node:
         probs = N_to_tau / np.sum(N_to_tau)
         probs[self.Ns == 0] = 0 # Assert this... was occasionly getting an error in which it chooses unvisited
         chosen_move = np.random.choice(len(self.moves), p=probs)
-
-        while chosen_move not in self.child_nodes:
-            # Ultimate temporary bodge
-            with open(f'game_tree_debug.txt', 'a') as f:
-                f.write(f"{self.state} {self.Ns} {chosen_move} {self.moves} {self.child_nodes} {probs}\n")
-            chosen_move = np.random.choice(list(self.child_nodes.keys()))
 
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
@@ -177,13 +175,14 @@ class GameTree(Process):
     add_dirichlet_noise = True
     save_non_root_states = False
     save_images_of_checkmates = True
+    full_rollout_virtual_loss = False
 
     agent_count = 0
 
     def __init__(self, save_dir: str, neural_net = None, training: bool =  False,
                  multiprocess: bool = False, process_queue: Queue = None,
                  experience_queue: Queue = None, results_queue: Queue = None,
-                 data_queue: Queue = None):
+                 data_queue: Queue = None, start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
 
         super().__init__()
 
@@ -216,10 +215,11 @@ class GameTree(Process):
         # Initiate root
         self.root = None
         self.time_waiting = 0.
+        self.start_state = str(start_state)
 
     def reset(self):
-        self.root = Node(state="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", board=chess_moves.ChessEngine())
-        # self.root = Node(state="8/1k6/8/1K6/3r4/8/8/8 w - - 24 151", board=chess_moves.ChessEngine())
+        # self.root = Node(state=start_state, board=chess_moves.ChessEngine())
+        self.root = Node(state=self.start_state, board=chess_moves.ChessEngine())
 
     def parallel_search(self, current_node: Node = None, number_of_expansions: int = 1000):
 
@@ -248,8 +248,12 @@ class GameTree(Process):
                 # Statistics
                 current_node.Ns[move_idx] += 1
 
+                if move_idx in current_node.child_nodes:
+                    # Get the reward for visiting again (if any). Flipped as its minus 1 for the team whos go it is losing
+                    current_node.Ws[move_idx] -= current_node.child_nodes[move_idx].R
+
                 # Set virtual loss to discourage search down here for a bit
-                if self.multiprocess:
+                if self.multiprocess and self.full_rollout_virtual_loss:
                     current_node.virtual_losses[move_idx] -= 1.
 
                 if move_idx in current_node.child_nodes:
@@ -290,6 +294,10 @@ class GameTree(Process):
                     current_node.branch_complete = True
 
             if not current_node.branch_complete and move_idx is not None and visited_moves:
+
+                # Set virtual loss to discourage search down here for a bit
+                if self.multiprocess and not self.full_rollout_virtual_loss:
+                    current_node.virtual_losses[move_idx] -= 1.
 
                 # If the graph is complete its already been done
                 current_node, reward, done = current_node.expand(move_idx, thread_env, state=current_node.state)
@@ -345,30 +353,33 @@ class GameTree(Process):
 
     def backpropagation(self, visited_moves, observed_reward: float, undo_v_loss: bool = True):
 
+        # New incoming state. If win... reward = -1 for current player as they have lost
         gamma_factor = 1
 
         # This is the other player as player who made a the move into the new state is the opposite player to whos turn
         # it is in the state
-        player = visited_moves[-1][0].player
+        reward = -observed_reward
+
+        if not self.full_rollout_virtual_loss:
+            last_node, move_idx = visited_moves[-1]
+            last_node.virtual_losses[move_idx] += 1
 
         for idx, (node, move_idx) in enumerate(reversed(visited_moves)):
 
-            # After doing a need evaluation, we get the other players chance of winning...
-            # We therefore flip the score when it us playing
-
-            if node.player == player:
-                # Flip for when the other player is observing reward
-                flip = -1
-            else:
-                flip = 1
-
             # Increment the visit count and update the total reward
-            new_Q = gamma_factor**idx * flip * observed_reward
+            new_Q = node.R + gamma_factor**idx * reward
 
             node.Ws[move_idx] += new_Q
 
-            if self.multiprocess and undo_v_loss:
-                node.virtual_losses[move_idx] += 1
+            # Player will choose their best move... maximum Q
+            Qs = node.Qs[node.Ns>0]
+            node.V = np.max(Qs)
+
+            # Only the best rewards propagate up the tree... otherwise player would not choose them
+            reward = -np.copy(node.V)
+
+            if self.full_rollout_virtual_loss and self.multiprocess and undo_v_loss:
+                    node.virtual_losses[move_idx] += 1
 
     def search_for_sufficiently_visited_nodes(self, root_node):
         self.recursive_search(root_node, 0, root_node)
@@ -468,7 +479,7 @@ class GameTree(Process):
                     node.Ps[move_idx] = prob
 
                 node.awaiting_processing = False
-                self.backpropagation(visited_moves, value)
+                self.backpropagation(visited_moves, value + reward)
                 batch_processed = True
 
         return batch_processed
@@ -501,7 +512,7 @@ class GameTree(Process):
 
         game_count = 0
         max_length = 300
-        sims = 500
+        sims = 10000
 
         while True:
 

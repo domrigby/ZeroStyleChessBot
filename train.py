@@ -19,6 +19,7 @@ from neural_nets.conv_net import ChessNet
 from tree.evaluator import NeuralNetHandling
 from tree.trainer import TrainingProcess
 from tree.parallel_game_tree import GameTree
+from util.test_fen_strings import FenTests
 
 if __name__ == '__main__':
 
@@ -40,7 +41,8 @@ if __name__ == '__main__':
     trainer = TrainingProcess("", neural_net=chess_net, experience_queues=[experience_queue], batch_size=128)
 
     tree = GameTree("", training=True, multiprocess=True,
-                    experience_queue=experience_queue, process_queue=process_queue, results_queue=results_queue)
+                    experience_queue=experience_queue, process_queue=process_queue, results_queue=results_queue,
+                    start_state=FenTests.MATE_IN_TW0)
 
     for _ in range(NUM_EVALUATORS):
         evaluators.append(NeuralNetHandling(neural_net=chess_net, process_queues=[process_queue],

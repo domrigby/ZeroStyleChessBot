@@ -10,11 +10,9 @@ if __name__ == "__main__":
 import chess
 import chess.svg
 import chess_moves
-from tree.parallel_game_tree import GameTree
-from tree.evaluator import NeuralNetHandling
 from util.queues import create_agents
+from util.test_fen_strings import FenTests
 
-from multiprocessing import Queue
 
 
 from neural_nets.conv_net import ChessNet
@@ -22,13 +20,16 @@ from neural_nets.conv_net import ChessNet
 if __name__ == '__main__':
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
-    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/RL_tuned_37000.pt")
+    # chess_net.load_network(r"/home/dom/Code/chess_bot/networks/RL_tuned_37000.pt")
     # chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model2_23.pt")
     chess_net.eval()
 
-    tree, evaluator, _, _ = create_agents(1, 1, 0, chess_net, training=False)
+    start_state = FenTests.MATE_IN_TW0
 
-    sims = 1000
+    tree, evaluator, _, _ = create_agents(1, 1, 0, chess_net, training=False,
+                                          start_state=start_state)
+
+    sims = 10000
 
     tree = tree[0]
 
@@ -37,6 +38,7 @@ if __name__ == '__main__':
     evaluator[0].start()
 
     main_board = chess.Board()
+    main_board.set_fen(start_state)
 
     import time
     ctr = 0
@@ -91,6 +93,10 @@ if __name__ == '__main__':
             break
         elif main_board.is_check():
             print("King is in check!")
+
+        if int(node.state.split()[-2]) >= 25:
+            print("Draw")
+            break
 
         ctr += 1
 
