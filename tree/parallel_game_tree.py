@@ -5,6 +5,8 @@ import time
 from multiprocessing import Queue, Process
 from queue import Empty
 from typing import List, Dict
+
+from neural_nets.data.fen_chess_puzzles.starting_states import LichessCuriculum
 from tree.memory import Memory, Turn
 import chess_moves
 import os
@@ -25,12 +27,12 @@ class GameOverType(Enum):
     NO_TAKES_DRAW = 2
 
 @njit(cache=True)
-def fast_puct(Ws, Ns, Ps, virtual_losses):
+def fast_puct(Qs, Ns, Ps, virtual_losses):
     """ numba compatible puct function. Outside class to only compile once"""
 
     visits = np.sum(Ns)
 
-    Qs = ( Ws / Ns ) + virtual_losses
+    Qs = Qs + virtual_losses
     Qs[Ns == 0] = 0
 
     puct_values = Qs + 3.0 * Ps * np.sqrt(visits + 1) / (Ns + 1)
@@ -48,23 +50,24 @@ def fast_puct(Ws, Ns, Ps, virtual_losses):
 
 class Node:
 
-    def __init__(self, state: str , board: chess_moves.ChessEngine =None, parent_node =None):
+    def __init__(self, state: str , move_idx: int = None, board: chess_moves.ChessEngine =None, parent_node =None):
 
         # The chess fen string object representing this state
         self.state: str = state
         self.player: str = self.state.split()[1]
 
         # Save a reference to the parent node
-        self.parent_node = parent_node  # Reference to the parent move
+        self.parent_node: Node = parent_node  # Reference to the parent move
+        self.move_idx: int = move_idx # Save the index of the move which created us
 
         # Generate child nodes for legal moves
         board.set_fen(self.state)
-        legal_moves =  board.legal_moves()
-        self.number_legal_moves = len(legal_moves)
+        legal_moves: List[str] =  board.legal_moves()
+        self.number_legal_moves: int = len(legal_moves)
 
         # Check if we have fully searched the branch
         if self.number_legal_moves == 0:
-            self.branch_complete_reason = 'No legal moves found'
+            self.branch_complete_reason: str = 'No legal moves found'
             self.branch_complete = True
         else:
             self.branch_complete = False
@@ -74,7 +77,7 @@ class Node:
 
         # Create edges
         self.moves = legal_moves
-        self.Ws = np.zeros(self.number_legal_moves)
+        self.Qs = np.zeros(self.number_legal_moves)
         self.Ns = np.zeros(self.number_legal_moves)
         self.Ps = np.ones(self.number_legal_moves) / self.number_legal_moves
         self.virtual_losses = np.zeros(self.number_legal_moves)
@@ -95,7 +98,7 @@ class Node:
         if self.number_legal_moves == 1:
             return 0
 
-        move_idx  = fast_puct(self.Ws, self.Ns, self.Ps, self.virtual_losses)
+        move_idx  = fast_puct(self.Qs, self.Ns, self.Ps, self.virtual_losses)
         return move_idx
 
     def expand(self, move_idx: int, board: chess.Board, state: str):
@@ -107,7 +110,7 @@ class Node:
         new_state: str = board.push(state, self.moves[move_idx])
 
         # Create a new child node
-        self.child_nodes[move_idx] = Node(new_state, board, parent_node=self)
+        self.child_nodes[move_idx] = Node(new_state, move_idx=move_idx, board=board, parent_node=self)
 
         # Calculate the reward
         done, result_code = board.is_game_over()
@@ -153,21 +156,17 @@ class Node:
         Select child node with the highest Q
         :return:
         """
-        Qs = self.Ws/self.Ns
+        local_Qs = np.copy(self.Qs)
         legit_moves = self.Ns > 0
-        Qs[~legit_moves] = -np.inf
-        q_max = np.max(Qs)
-        max_idxs = np.where(Qs==q_max)[0]
+        local_Qs[~legit_moves] = -np.inf
+        q_max = np.max(local_Qs)
+        max_idxs = np.where(local_Qs==q_max)[0]
         chosen_move = np.random.choice(max_idxs)
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
     @property
     def legal_move_strings(self):
         return [str(move) for move in self.moves]
-
-    @property
-    def Qs(self):
-        return self.Ws/self.Ns
 
 
 class GameTree(Process):
@@ -176,6 +175,7 @@ class GameTree(Process):
     save_non_root_states = False
     save_images_of_checkmates = True
     full_rollout_virtual_loss = False
+    curiculum = True
 
     agent_count = 0
 
@@ -217,11 +217,17 @@ class GameTree(Process):
         self.time_waiting = 0.
         self.start_state = str(start_state)
 
-    def reset(self):
-        # self.root = Node(state=start_state, board=chess_moves.ChessEngine())
-        self.root = Node(state=self.start_state, board=chess_moves.ChessEngine())
+        self.curiculum_generator = None if not self.curiculum \
+            else LichessCuriculum('/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv')
+
+    def reset(self, start_state: str = None):
+        if start_state is None:
+            start_state = self.start_state
+        self.root = Node(state=start_state, board=chess_moves.ChessEngine())
 
     def parallel_search(self, current_node: Node = None, number_of_expansions: int = 1000):
+
+        end_nodes: List[Node] = []
 
         if current_node is None:
             current_node = self.root
@@ -247,10 +253,6 @@ class GameTree(Process):
 
                 # Statistics
                 current_node.Ns[move_idx] += 1
-
-                if move_idx in current_node.child_nodes:
-                    # Get the reward for visiting again (if any). Flipped as its minus 1 for the team whos go it is losing
-                    current_node.Ws[move_idx] -= current_node.child_nodes[move_idx].R
 
                 # Set virtual loss to discourage search down here for a bit
                 if self.multiprocess and self.full_rollout_virtual_loss:
@@ -287,12 +289,7 @@ class GameTree(Process):
 
                 if move_idx is None:
                     break
-
-                if all([child_node_idx in current_node.child_nodes
-                        and current_node.child_nodes[child_node_idx].branch_complete
-                        for child_node_idx in range(len(current_node.moves))]):
-                    current_node.branch_complete = True
-
+                
             if not current_node.branch_complete and move_idx is not None and visited_moves:
 
                 # Set virtual loss to discourage search down here for a bit
@@ -334,15 +331,16 @@ class GameTree(Process):
                         # TODO: handle these better
                         self.undo_informationless_rollout(visited_moves)
 
-                # Save checkmates and stalemate games to memory. Got rid of no takes draws as they just spam the memory
-                # as quite often when you get close to 50 no takes there are tens of differnt possible games which lead
-                # a draw
-                if self.training and done and current_node.game_over_type != GameOverType.NO_TAKES_DRAW:
-                    # We have found a full game... save result to memory
-                    self.save_results_to_memory(current_node)
+                if current_node.branch_complete and current_node.game_over_type is not GameOverType.NO_TAKES_DRAW:
+                    end_nodes.append(current_node)
 
             # Now return to root node
             current_node = self.root
+
+        # Wait until the end of the rollout and then save any games which finished.
+        if self.training:
+            for node in end_nodes:
+                self.save_path_whilst_optimal(node)
 
     @staticmethod
     def undo_informationless_rollout(visited_moves):
@@ -369,7 +367,7 @@ class GameTree(Process):
             # Increment the visit count and update the total reward
             new_Q = node.R + gamma_factor**idx * reward
 
-            node.Ws[move_idx] += new_Q
+            node.Qs[move_idx] = new_Q
 
             # Player will choose their best move... maximum Q
             Qs = node.Qs[node.Ns>0]
@@ -383,6 +381,54 @@ class GameTree(Process):
 
     def search_for_sufficiently_visited_nodes(self, root_node):
         self.recursive_search(root_node, 0, root_node)
+
+
+    def save_path_whilst_optimal(self, current_node: Node):
+        """ Find games in which both players have played optimally at least for two moves"""
+        game_states: List[dict] = []
+
+        # Get game winner
+        if current_node.game_won:
+            winner = current_node.parent_node.player
+        else:
+            winner = None
+
+        # Iterate up the tree and save the states for processing
+        while current_node.parent_node is not None:
+
+            best_parent_move = current_node.parent_node.Qs.argmax()
+
+            if best_parent_move != current_node.move_idx:
+                break
+
+            state = current_node.state
+            moves = current_node.moves
+            visit_counts = current_node.Ns
+
+            if winner is not None:
+                if current_node.player == winner:
+                    value = 1
+                else:
+                    value = -1
+            else:
+                value = 0
+
+            game_states.append({'state': state, 'moves': moves, 'visit_counts': visit_counts, 'value': value})
+            self.saved_memory_local += 1
+            current_node = current_node.parent_node
+
+        # Make sure its even to not get bias to wins
+        if len(game_states) % 2 != 0:
+            game_states = game_states[:len(game_states) // 2]
+
+        if len(game_states) == 0:
+            return
+
+        if not self.multiprocess:
+            self.memory.save_game_to_memory((game_states, self.agent_id))
+        else:
+            self.experience_queue.put((game_states, self.agent_id))
+
 
     def recursive_search(self, node, count, root_node):
         """
@@ -512,7 +558,7 @@ class GameTree(Process):
 
         game_count = 0
         max_length = 300
-        sims = 10000
+        sims = 1000
 
         while True:
 
@@ -521,7 +567,15 @@ class GameTree(Process):
             move_count = 0
             main_board = chess.Board()
 
-            self.reset()
+            if self.curiculum:
+                # This has some progressively more difficult chess puzzles
+                start_state= self.curiculum_generator.get_start_state(game_count)
+            else:
+                start_state = self.start_state
+
+            # Reset main board to start state
+            self.reset(start_state)
+            main_board.set_fen(start_state)
 
             node = self.root
             player_check_mated = None
@@ -548,7 +602,7 @@ class GameTree(Process):
                 main_board.set_fen(self.root.state)
                 main_board.push(chess_move)
 
-                # print(f"Agent {self.agent_id} Game {game_count} Move: {move_count}")
+                print(f"Agent {self.agent_id} Game {game_count} Move: {move_count}")
                 # print("Board:")
                 # print(main_board)
                 #
@@ -586,6 +640,9 @@ class GameTree(Process):
 
                     # Increment move count
                     move_count += 1
+
+                # Here we search down the tree using the best moves and see if there is a checkmate
+
 
                 if self.root.branch_complete:
                     self.save_results_to_memory(self.root)

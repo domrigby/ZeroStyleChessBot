@@ -38,11 +38,10 @@ if __name__ == '__main__':
     # Set the neural network parameters to be shared
     chess_net.share_memory()
 
-    trainer = TrainingProcess("", neural_net=chess_net, experience_queues=[experience_queue], batch_size=128)
+    trainer = TrainingProcess("/home/dom/Code/chess_bot/sessions/run_at_20250218_220245", neural_net=chess_net, experience_queues=[experience_queue], batch_size=128)
 
-    tree = GameTree("", training=True, multiprocess=True,
-                    experience_queue=experience_queue, process_queue=process_queue, results_queue=results_queue,
-                    start_state=FenTests.MATE_IN_TW0)
+    tree = GameTree("/home/dom/Code/chess_bot/sessions/run_at_20250218_220245", training=True, multiprocess=True,
+                    experience_queue=experience_queue, process_queue=process_queue, results_queue=results_queue)
 
     for _ in range(NUM_EVALUATORS):
         evaluators.append(NeuralNetHandling(neural_net=chess_net, process_queues=[process_queue],

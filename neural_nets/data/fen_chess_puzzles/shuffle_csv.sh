@@ -1,0 +1,1 @@
+(head -n 1 /home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv && tail -n +2 /home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv | shuf -n 10000) > sample.csv

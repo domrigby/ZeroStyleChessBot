@@ -89,7 +89,6 @@ class TrainingProcess(Process):
 
                 self.last_update_time = time_now
                 self.memory.save_data()
-                self.neural_net.save_network(f'networks/RL_tuned_{self.training_count}.pt')
 
                 with open(self.save_dir+'/debug.txt', 'w') as f:
                     now = datetime.now()
@@ -97,6 +96,8 @@ class TrainingProcess(Process):
                     f.write(f'experiencel length: {len(self.memory.data):.3f} total_loss: {self.total_loss_window.mean():.3f}\n'
                             f'value_loss: {self.value_loss_window.mean():.3f} policy_loss: {self.pol_loss_window.mean():.5f}\n')
 
+            if time_now - self.last_update_time > 600 and self.data_queue is not None:
+                self.neural_net.save_network(f'networks/RL_tuned_{self.training_count}.pt')
 
     def train_neural_network(self):
         """ Train the neural network using the experiences from the memory """

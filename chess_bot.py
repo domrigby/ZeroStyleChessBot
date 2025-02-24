@@ -20,14 +20,13 @@ from neural_nets.conv_net import ChessNet
 if __name__ == '__main__':
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
-    # chess_net.load_network(r"/home/dom/Code/chess_bot/networks/RL_tuned_37000.pt")
+    chess_net.load_network(r"/home/dom/Code/chess_bot/networks/RL_tuned_30832.pt")
     # chess_net.load_network(r"/home/dom/Code/chess_bot/networks/best_model2_23.pt")
     chess_net.eval()
 
     start_state = FenTests.MATE_IN_TW0
 
-    tree, evaluator, _, _ = create_agents(1, 1, 0, chess_net, training=False,
-                                          start_state=start_state)
+    tree, evaluator, _, _ = create_agents(1, 1, 0, chess_net, training=False)
 
     sims = 10000
 
@@ -38,7 +37,6 @@ if __name__ == '__main__':
     evaluator[0].start()
 
     main_board = chess.Board()
-    main_board.set_fen(start_state)
 
     import time
     ctr = 0
