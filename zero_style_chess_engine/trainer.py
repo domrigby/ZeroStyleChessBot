@@ -1,6 +1,6 @@
 from multiprocessing import Process, Queue, Lock
 from queue import Empty
-from tree.memory import Memory
+from zero_style_chess_engine.memory import Memory
 import chess_moves
 from typing import List
 from neural_nets.conv_net import ChessNet

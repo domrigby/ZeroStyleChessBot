@@ -7,7 +7,7 @@ from queue import Empty
 from typing import List, Dict, Optional
 
 from neural_nets.data.fen_chess_puzzles.starting_states import LichessCuriculum
-from tree.memory import Memory, Turn
+from zero_style_chess_engine.memory import Memory, Turn
 import chess_moves
 import os
 from enum import Enum

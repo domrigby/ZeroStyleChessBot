@@ -17,6 +17,7 @@ from neural_nets.conv_net import ChessNet
 
 
 class ChessDataset(Dataset):
+
     def __init__(self, moves_dir: str, accepted_win_types: List[str] = None, rejected_win_types: List[str] = None,
                  sample_size: int = 2500000):
         """
@@ -98,7 +99,6 @@ if __name__ == '__main__':
 
     # Initialize the network
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=0.001)
-
 
     import matplotlib.pyplot as plt
 

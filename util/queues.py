@@ -3,9 +3,9 @@ from torch import multiprocessing
 from datetime import datetime
 import os
 from typing import List, Dict
-from tree.parallel_game_tree import GameTree
-from tree.evaluator import NeuralNetHandling
-from tree.trainer import TrainingProcess
+from zero_style_chess_engine.parallel_game_tree import GameTree
+from zero_style_chess_engine.evaluator import NeuralNetHandling
+from zero_style_chess_engine.trainer import TrainingProcess
 
 def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True,
                   start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):

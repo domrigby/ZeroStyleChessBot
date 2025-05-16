@@ -1,5 +1,5 @@
 import sys, math, threading, pygame, chess
-from tree.engine_interface import EngineInterface  # Your engine interface module
+from zero_style_chess_engine.engine_interface import EngineInterface  # Your engine interface module
 import multiprocessing as mp
 
 if __name__ == '__main__':

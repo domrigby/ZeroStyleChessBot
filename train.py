@@ -16,9 +16,9 @@ import chess_moves
 import torch.multiprocessing as torch_mp
 
 from neural_nets.conv_net import ChessNet
-from tree.evaluator import NeuralNetHandling
-from tree.trainer import TrainingProcess
-from tree.parallel_game_tree import GameTree
+from zero_style_chess_engine.evaluator import NeuralNetHandling
+from zero_style_chess_engine.trainer import TrainingProcess
+from zero_style_chess_engine.parallel_game_tree import GameTree
 from util.test_fen_strings import FenTests
 
 if __name__ == '__main__':
