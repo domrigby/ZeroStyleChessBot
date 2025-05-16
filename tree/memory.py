@@ -3,6 +3,8 @@ from typing import List, Dict, Optional
 import numpy as np
 from enum import Enum
 import pickle as pkl
+from datetime import datetime
+import glob, os
 
 class Turn(Enum):
     BLACK = 'black'
@@ -42,6 +44,10 @@ class Memory:
 
         if preload_data is not None:
             self.load_data(preload_data)
+
+        self.load_directory()
+
+        self.last_index_saved = len(self.data)
 
     def __len__(self):
         return len(self.data)
@@ -104,6 +110,19 @@ class Memory:
             moves = pkl.load(f)
         self.data = moves
 
-    def save_data(self):
-        with open('new_data.pkl', 'wb') as f:
-            pkl.dump(self.data, f)
+    def load_directory(self):
+        path = r"neural_nets/generated_data"
+        files = glob.glob(os.path.join(path, "*.pkl"))
+        for file in files:
+            with open(file, 'rb') as f:
+                moves = pkl.load(f)
+                self.data.extend(moves)
+
+    def save_data(self, file_path: str = None):
+        if file_path is None:
+            now = datetime.now()
+            time_string = now.strftime("data_at%Y%m%d_%H%M%S")
+            file_path = f"neural_nets/generated_data/{time_string}_len_{len(self.data)-self.last_index_saved}.pkl"
+        with open(file_path, 'wb') as f:
+            pkl.dump(self.data[self.last_index_saved:], f)
+        self.last_index_saved = len(self.data)

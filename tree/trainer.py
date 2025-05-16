@@ -9,18 +9,21 @@ import time
 import os.path
 from util.parallel_error_log import error_logger
 from datetime import datetime
+import torch
 
 
 class TrainingProcess(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
-    min_games_to_train = 1000
+    min_games_to_train = 0
 
-    def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, batch_size: int = 32,
-                 min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None, load_path: str = None):
+    def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, weights_queue: Queue = None,
+                 batch_size: int = 32, min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None, load_path: str = None,
+                 weights_update_freq: int = 100):
         """
         :param queue: queue from the tree search
         :param lock:
         """
+
         super().__init__()
 
         self.save_dir = save_dir
@@ -28,15 +31,17 @@ class TrainingProcess(Process):
 
         self.experience_queue = experience_queues
         self.data_queue = data_queue
+        self.weights_queue = weights_queue
 
         # Currently going to update it off a training count... in future want to add a seperate validation set of which
         # we only add the best
         self.training_count = 0
+        self.weights_update_freq = weights_update_freq
 
         self.running = True
 
         self.batch_size = batch_size
-        self.min_num_batches_to_train = 10 #min_num_batches_to_train
+        self.min_num_batches_to_train = min_num_batches_to_train
 
         self.neural_net = neural_net
 
@@ -49,6 +54,7 @@ class TrainingProcess(Process):
         self.total_loss_window = np.zeros(self.update_period)
 
         self.last_update_time = time.time()
+        self.last_network_save = time.time()
 
         self.games_played = 0
 
@@ -58,7 +64,8 @@ class TrainingProcess(Process):
     @error_logger
     def run(self):
 
-        # If there are states in the qy
+        # Create cuda stream
+        stream = torch.cuda.Stream()
 
         while True:
 
@@ -74,7 +81,8 @@ class TrainingProcess(Process):
                         break
 
             if self.games_played >= self.min_games_to_train:
-                self.train_neural_network()
+                with torch.cuda.stream(stream):
+                    self.train_neural_network()
 
             time_now = time.time()
 
@@ -88,16 +96,22 @@ class TrainingProcess(Process):
                 self.data_queue.put_nowait(new_data)
 
                 self.last_update_time = time_now
-                self.memory.save_data()
 
                 with open(self.save_dir+'/debug.txt', 'w') as f:
                     now = datetime.now()
                     f.write(f'Still alive at time: {now.strftime("%m/%d/%Y, %H:%M:%S")}\n')
-                    f.write(f'experiencel length: {len(self.memory.data):.3f} total_loss: {self.total_loss_window.mean():.3f}\n'
-                            f'value_loss: {self.value_loss_window.mean():.3f} policy_loss: {self.pol_loss_window.mean():.5f}\n')
+                    f.write(f'experience_length: {len(self.memory.data):.5f} total_loss: {self.total_loss_window.mean():.5f}\n'
+                            f'value_loss: {self.value_loss_window.mean():.5f} policy_loss: {self.pol_loss_window.mean():.5f}\n'
+                            f'Games played: {self.games_played}')
 
-            if time_now - self.last_update_time > 600 and self.data_queue is not None:
+            if time_now - self.last_network_save > 600 and self.data_queue is not None:
                 self.neural_net.save_network(f'networks/RL_tuned_{self.training_count}.pt')
+                self.last_network_save = time.time()
+                self.memory.save_data()
+
+            # Do a weights update every N training steps
+            if self.training_count > 0 and self.training_count%self.weights_update_freq == 0:
+                self.send_weights_update()
 
     def train_neural_network(self):
         """ Train the neural network using the experiences from the memory """
@@ -116,8 +130,9 @@ class TrainingProcess(Process):
 
         self.training_count += 1
 
-    def update_node_and_edges(self, state, evaluation):
-        pass
+    def send_weights_update(self):
+        weights = {k: v.cpu() for k,v in self.neural_net.state_dict().items()}
+        self.weights_queue.put(weights)
 
     def stop(self):
         self.running = False
@@ -128,7 +143,8 @@ if __name__ == "__main__":
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.001)
     training_data_queue = Queue()
 
-    trainer = TrainingProcess(save_dir="", neural_net=chess_net, experience_queues=[Queue()], batch_size=128,
+    trainer = TrainingProcess(save_dir="/home/dom/Code/chess_bot/sessions/run_at_20250218_220245",
+                              neural_net=chess_net, experience_queues=[Queue()], batch_size=128,
                               num_agents=1, data_queue=Queue(), load_path="/home/dom/Code/chess_bot/new_data.pkl")
 
     trainer.games_played = 100000

@@ -43,6 +43,7 @@ class ChessNet(GenericNet):
                                      nn.Flatten(),
                                      nn.Linear(4*64, 256),
                                      nn.LeakyReLU(),
+                                     nn.Dropout(p=0.2),
                                      nn.BatchNorm1d(256),
                                      nn.Linear(256, 1),
                                      nn.Tanh())
@@ -71,18 +72,17 @@ class ChessNet(GenericNet):
         policy = policy.view(size_pre_flat)
 
         if infering and legal_move_mask is not None:
-
             policy = torch.where(legal_move_mask == 1, policy, 0)
 
         return value, policy
 
-    def loss_function(self, input: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None, training: bool = True):
+    def loss_function(self, input_tensor: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None, training: bool = True):
 
         target_value, target_policy = target
         target_value, target_policy = target_value.to(self.device, non_blocking=True), target_policy.to(self.device, non_blocking=True)
 
         # Predicted value
-        predicted_value, predicted_policy = self(input, legal_move_mask)
+        predicted_value, predicted_policy = self(input_tensor, legal_move_mask)
 
         if target_value.ndim == 1:
             target_value = target_value.unsqueeze(-1)
@@ -93,13 +93,11 @@ class ChessNet(GenericNet):
 
         total_loss = value_loss + policy_loss
 
-        if torch.isnan(total_loss):
-            print("here!")
-
         # Step the weights
         if training:
             self.optimiser.zero_grad()
             total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
             self.optimiser.step()
 
         return total_loss, value_loss, policy_loss

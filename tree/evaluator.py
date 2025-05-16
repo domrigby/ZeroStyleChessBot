@@ -11,7 +11,7 @@ class NeuralNetHandling(Process):
 
     test_mode = False
 
-    def __init__(self, neural_net: ChessNet, process_queues: List[Queue] = None,
+    def __init__(self, neural_net: ChessNet, process_queues: List[Queue] = None, weights_queue: Queue = None,
                  results_queue_dict: Dict[int, Queue] = None, batch_size: int = 64):
         """
         :param queue: queue from the tree search
@@ -19,6 +19,7 @@ class NeuralNetHandling(Process):
         """
         super().__init__()
         self.process_queue = process_queues
+        self.weights_queue = weights_queue
 
         if results_queue_dict:
             self.results_queue = results_queue_dict
@@ -30,6 +31,8 @@ class NeuralNetHandling(Process):
         self.batch_size = batch_size
 
         self.neural_net = neural_net
+        self.neural_net.compile()
+
         self.processed_count = 0
 
     def run(self):
@@ -38,8 +41,12 @@ class NeuralNetHandling(Process):
         if self.results_queue is None:
             raise ValueError("NO RESULTS QUEUE: User must provide results queue from their game tree.")
 
+        stream = torch.cuda.Stream()
+
         while self.running:
-            self.collect_and_process()
+            with torch.cuda.stream(stream):
+                self.collect_and_process()
+            self.check_for_network_update()
 
     def collect_and_process(self):
         agent_ids, hashes, states, legal_moves = [], [], [], []
@@ -49,13 +56,13 @@ class NeuralNetHandling(Process):
 
         if total_occupancy == 0:
             return
-            # continue  # Skip iteration if queues are empty
 
         # Compute batch allocation **only for non-empty queues**
         batch_size_allowance = np.round(self.batch_size * queue_occupancy / total_occupancy).astype(int)
 
         # Process each queue in **parallel** (avoids nested loops)
         for idx, (queue, allowance) in enumerate(zip(self.process_queue, batch_size_allowance)):
+
             if queue.empty():
                 continue
 
@@ -67,6 +74,7 @@ class NeuralNetHandling(Process):
                     states.append(state)
                     legal_moves.append(legal_moves_strings)
                     self.processed_count += 1
+
                 except Empty:
                     break  # Queue was unexpectedly empty
 
@@ -95,6 +103,16 @@ class NeuralNetHandling(Process):
         # Send the batches back
         for agent_id, results in batched_results.items():
             self.results_queue[agent_id].put(results)
+
+    def check_for_network_update(self):
+        try:
+            new_weights = self.weights_queue.get_nowait()
+            self.neural_net.load_state_dict(new_weights)
+            self.neural_net.to(self.neural_net.device)
+            #  My GPU is too old to compile cuda :(
+            # self.neural_net.compile()
+        except Empty:
+            return
 
     def test_mode_func(self, hashes, states, legal_moves):
 

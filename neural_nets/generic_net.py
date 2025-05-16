@@ -51,10 +51,11 @@ class GenericNet(nn.Module):
         # Initialise the network
         self._build_network()
 
-        self.optimiser = Adam(self.parameters(), lr=init_lr, weight_decay=1e-5)
-        # Initialize the scheduler
-        self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=1000, gamma=0.98)
+        self.optimiser = Adam(self.parameters(), lr=init_lr, weight_decay=1e-4)
 
+        # Initialize the scheduler
+        self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=2500, gamma=0.99)
+        # self.scheduler = lr_scheduler.CosineAnnealingWarmRestarts(self.optimiser, 10000, 1, 1e-6)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         self.to(self.device)

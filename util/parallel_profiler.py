@@ -11,6 +11,6 @@ def parallel_profile(func):
         profiler.enable()
         result = func(*args, **kwargs)
         profiler.disable()
-        profiler.print_stats(sort="cumtime")
+        profiler.print_stats(sort="tottime")
         return result
     return wrapper

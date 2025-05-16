@@ -3,6 +3,9 @@ from neural_nets.conv_net import ChessNet
 from util.queues import create_agents
 from util.training_monitor import ChessEngineMonitor
 from queue import Empty
+from datetime import datetime
+import os
+import time
 
 class ParallelMonitor:
 
@@ -21,17 +24,28 @@ if __name__ == "__main__":
     NUM_TRAINERS = 1
     NUM_AGENTS = 3
 
+    now = datetime.now()  # Get the current date and time
+    # datetime_string = now.strftime("run_at_%Y%m%d_%H%M%S")  # Format as string
+    # folder_name = f"sessions/{datetime_string}"
+    # os.mkdir(folder_name)
+
+    folder_name = "/home/dom/Code/chess_bot/sessions/run_at_20250515_210942"
+
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.001)
+    chess_net.load_network("/home/dom/Code/chess_bot/test.pt")
     chess_net.share_memory()
 
-    agents, evaluators, trainers, data_queues_dicts = create_agents(NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS, chess_net)
+    agents, evaluators, trainers, data_queues_dicts = create_agents(folder_name, NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS, chess_net)
 
     [trainer.start() for trainer in trainers]
     [eval.start() for eval in evaluators]
     [agent.start() for agent in agents]
+    print("Agent training has commenced.")
 
-    monitor = ChessEngineMonitor()
+    monitor = ChessEngineMonitor(folder_name)
     monitor.refresh()
+
+    start_time = time.time()
 
     while True:
 
@@ -62,3 +76,9 @@ if __name__ == "__main__":
                 continue
 
             monitor.refresh()
+
+            time_now = time.time()
+
+            if time_now - start_time > 600:
+                monitor.save_progress()
+                start_time = time_now

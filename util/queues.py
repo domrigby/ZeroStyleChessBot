@@ -1,4 +1,5 @@
 from multiprocessing import Queue
+from torch import multiprocessing
 from datetime import datetime
 import os
 from typing import List, Dict
@@ -6,7 +7,7 @@ from tree.parallel_game_tree import GameTree
 from tree.evaluator import NeuralNetHandling
 from tree.trainer import TrainingProcess
 
-def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True,
+def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True,
                   start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
     """
     This function initialises all the agents and strings and distributes the queues accordingly
@@ -17,11 +18,6 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
     :param start_state
     :return:
     """
-
-    now = datetime.now()  # Get the current date and time
-    datetime_string = now.strftime("run_at_%Y%m%d_%H%M%S")  # Format as string
-    folder_name = f"sessions/{datetime_string}"
-    os.mkdir(folder_name)
 
     agents_per_evaluator = num_agents / num_evaluators
 
@@ -34,6 +30,7 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
     process_queues: List[List[Queue]] = [[] for _ in range(num_evaluators)]
     training_queues: List[List[Queue]] = [[] for _ in range(num_trainers)]
     data_queues: Dict[str, List[Queue]] = {'agents': [], 'training': []}
+    weights_queue: Queue = multiprocessing.Queue()
 
     for idx in range(num_agents):
 
@@ -52,7 +49,7 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
         else:
             training_queue = None
 
-        agent = GameTree(save_dir=folder_name, training=training, multiprocess=True, process_queue=process_queue,
+        agent = GameTree(save_dir=save_dir, training=training, multiprocess=True, process_queue=process_queue,
                          experience_queue=training_queue, results_queue=results_queue, data_queue=agent_data_queue,
                          start_state=start_state)
 
@@ -62,7 +59,7 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
     # Evaluator
     evaluators: List[NeuralNetHandling] = []
     for idx in range(num_evaluators):
-        evaluator = NeuralNetHandling(neural_net=network, process_queues=process_queues[idx],
+        evaluator = NeuralNetHandling(neural_net=network, process_queues=process_queues[idx], weights_queue=weights_queue,
                                      results_queue_dict=results_queue_dicts, batch_size=256)
         evaluators.append(evaluator)
 
@@ -70,7 +67,8 @@ def create_agents(num_agents: int, num_evaluators: int, num_trainers: int, netwo
     for idx in range(num_trainers):
         training_data_queue = Queue()
         data_queues['training'].append(training_data_queue)
-        trainers.append(TrainingProcess(save_dir=folder_name ,neural_net=network, experience_queues=training_queues[idx],
-                                        batch_size=128, num_agents=num_agents, data_queue=training_data_queue))
+        trainers.append(TrainingProcess(save_dir=save_dir ,neural_net=network, experience_queues=training_queues[idx],
+                                        batch_size=128, num_agents=num_agents, data_queue=training_data_queue,
+                                        weights_queue=weights_queue, min_num_batches_to_train=1))
 
     return agents, evaluators, trainers, data_queues
