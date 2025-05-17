@@ -6,7 +6,7 @@ from multiprocessing import Queue, Process
 from queue import Empty
 from typing import List, Dict, Optional
 
-from neural_nets.data.fen_chess_puzzles.starting_states import LichessCuriculum
+from neural_nets.data.fen_chess_puzzles.curiculum_maker import LichessCuriculum
 from zero_style_chess_engine.memory import Memory, Turn
 import chess_moves
 import os

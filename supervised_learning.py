@@ -66,23 +66,63 @@ class ChessDataset(Dataset):
         # Convert FEN state and move to tensors
         board_tensor = self.chess_engine.fen_to_tensor(fen)
 
-        # Create the illegal move mask
+        # Create move tensor
         move_tensor = torch.zeros((70, 8, 8), dtype=torch.int)
 
         if fen.split()[1] == "b":
-            legal_move_str = self.chess_engine.unflip_move(str(move))
-            indices = self.chess_engine.move_to_target_indices(legal_move_str)
+            move = self.chess_engine.unflip_move(str(move))
+            indices = self.chess_engine.move_to_target_indices(move)
         else:
             indices = self.chess_engine.move_to_target_indices(str(move))
 
-        move_tensor[indices] = 1.
+        move_tensor[indices] = 1
+
+        # Create the legal move mask
+        self.chess_engine.set_fen(fen)
+        legal_moves = self.chess_engine.legal_moves()
+        legal_move_mask, leg_move_lookup = self.create_legal_move_mask(legal_moves, player)
+
+        if legal_move_mask[torch.unravel_index(move_tensor.argmax(), (70, 8, 8))] != 1:
+            raise RuntimeError(f"Masking tensor does include the move target. \n\tDetails:\n\t\tPlayer = {player}"
+                               f"\n\t\tFEN = {fen}"
+                               f"\n\t\tOriginal move = {data['moves']}"
+                               f"\n\t\tMove = {move}"
+                               f"\n\t\tLegal moves = {[move for move, _ in leg_move_lookup]}")
 
         return {
             'state': board_tensor,
             'move': move_tensor,
             'player': player,
-            'value': value
+            'value': value,
+            'legal_move_mask': legal_move_mask
         }
+
+    def create_legal_move_mask(self, moves, team):
+        move_to_indices_lookup = []
+
+        # Collect indices for batch updates
+        all_indices = []
+
+        for legal_move in moves:
+            # Ignore pawn promotions for now
+            if len(str(legal_move)) < 5:
+                if team == "black":
+                    legal_move_str = self.chess_engine.unflip_move(str(legal_move))
+                    indices = self.chess_engine.move_to_target_indices(legal_move_str)
+                else:
+                    indices = self.chess_engine.move_to_target_indices(str(legal_move))
+
+                all_indices.append(indices)
+                move_to_indices_lookup.append([legal_move, indices])
+
+        # Create mask efficiently with batched updates
+        legal_move_mask = torch.zeros((70, 8, 8), dtype=torch.float32)
+        if all_indices:  # only if we have legal moves
+            idx_tensor = torch.tensor(all_indices, dtype=torch.long)  # (N,3)
+            c, r, k = idx_tensor[:, 0], idx_tensor[:, 1], idx_tensor[:, 2]
+            legal_move_mask[c, r, k] = 1.0  # set exactly those cells to 1
+
+        return legal_move_mask, move_to_indices_lookup
 
 
 if __name__ == '__main__':
@@ -204,11 +244,13 @@ if __name__ == '__main__':
             state_tensor = batch['state']
             move_target_tensor = batch['move']
             value_target = batch['value']
+            legal_move_mask = batch['legal_move_mask']
 
             # Calculate loss
             loss, value_loss, policy_loss = chess_net.loss_function(
                 state_tensor,
-                (value_target.float(), move_target_tensor.float())
+                (value_target.float(), move_target_tensor.float()),
+                legal_move_mask=legal_move_mask
             )
 
             # Update loss values for plotting

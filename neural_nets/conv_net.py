@@ -6,7 +6,8 @@ from typing import List
 
 class ChessNet(GenericNet):
 
-    def __init__(self, *args, num_filters: int = 64, num_repeats: int= 6, **kwargs):
+    def __init__(self, *args, num_filters: int = 64, num_repeats: int= 6, policy_loss_factor: float = 1.,
+                 value_loss_factor: float = .5, **kwargs):
 
         # Control convolution parameters
         self.num_filters = num_filters
@@ -16,6 +17,10 @@ class ChessNet(GenericNet):
 
         self.value_loss = nn.MSELoss()
         self.policy_loss = nn.CrossEntropyLoss()
+
+        # Set the loss balancing factors
+        self.pol_alpha: float = policy_loss_factor
+        self.val_beta: float = value_loss_factor
 
     def _build_network(self):
 
@@ -82,7 +87,7 @@ class ChessNet(GenericNet):
         target_value, target_policy = target_value.to(self.device, non_blocking=True), target_policy.to(self.device, non_blocking=True)
 
         # Predicted value
-        predicted_value, predicted_policy = self(input_tensor, legal_move_mask)
+        predicted_value, predicted_policy = self(input_tensor, legal_move_mask, infering=True)
 
         if target_value.ndim == 1:
             target_value = target_value.unsqueeze(-1)
@@ -91,7 +96,7 @@ class ChessNet(GenericNet):
         value_loss = self.value_loss(predicted_value, target_value)
         policy_loss = self.policy_loss(predicted_policy, target_policy)
 
-        total_loss = value_loss + policy_loss
+        total_loss = self.val_beta * value_loss + self.pol_alpha * policy_loss
 
         # Step the weights
         if training:

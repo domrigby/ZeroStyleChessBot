@@ -53,8 +53,6 @@ public:
 
 //        std::cout << white_to_move << std::endl;
 
-
-
         // For each pseudo-legal move, apply it, check if the king is safe, then undo it.
         for (const auto& mv : pseudo_moves) {
             // Apply the move using bitboards; this returns the captured piece (if any)

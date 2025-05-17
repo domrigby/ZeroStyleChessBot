@@ -54,10 +54,17 @@ class GenericNet(nn.Module):
         self.optimiser = Adam(self.parameters(), lr=init_lr, weight_decay=1e-4)
 
         # Initialize the scheduler
-        self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=2500, gamma=0.99)
-        # self.scheduler = lr_scheduler.CosineAnnealingWarmRestarts(self.optimiser, 10000, 1, 1e-6)
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=2500, gamma=0.99)
+        self.scheduler = lr_scheduler.OneCycleLR(self.optimiser,
+            max_lr              = init_lr * 10,
+            total_steps         = int(250e3),
+            pct_start           = 0.05,        # 5% of steps warming up
+            anneal_strategy     = 'cos',
+            div_factor          = 250,
+            final_div_factor    = 1e4)
 
+        # Send to CUDA device
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.to(self.device)
 
 
@@ -101,9 +108,10 @@ class GenericNet(nn.Module):
 
         # Create mask efficiently with batched updates
         legal_move_mask = torch.zeros(self.output_size, dtype=torch.float32)
-        if all_indices:
-            all_indices = torch.tensor(all_indices, dtype=torch.long).flatten()  # Ensure 1D tensor
-            legal_move_mask.index_fill_(0, all_indices, 1)
+        if all_indices:  # only if we have legal moves
+            idx_tensor = torch.tensor(all_indices, dtype=torch.long)  # (N,3)
+            c, r, k = idx_tensor[:, 0], idx_tensor[:, 1], idx_tensor[:, 2]
+            legal_move_mask[c, r, k] = 1.0  # set exactly those cells to 1
 
         return legal_move_mask, move_to_indices_lookup
 

@@ -1,3 +1,5 @@
+# Lichess puzzles start after one move. We therefore have to apply the first move to get a proper dataset
+
 import chess_moves
 import pandas as pd
 import pickle as pkl
@@ -17,6 +19,8 @@ for rows in csv.iterrows():
     moves = rows[1]['Moves'].split()
 
     loser = fen.split()[1]
+    if 'opening' in rows[1]['Themes']:
+        loser = None
 
     train = np.random.random() < 0.9
 
@@ -28,7 +32,12 @@ for rows in csv.iterrows():
             break
 
         player = fen.split()[1]
-        win = 1 if player != loser else -1
+        
+        if loser is None:
+            win = 0
+        else:
+            win = 1 if player != loser else -1
+
         new_dp = {'fen': fen, 'moves': moves[idx + 1], 'value': win}
 
         if train:
@@ -42,7 +51,9 @@ for rows in csv.iterrows():
 # csv.to_csv("/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/one_move_pushed.csv", index=False)
 
 with open('training_moves.pkl', 'wb') as f:
+    np.random.shuffle(train_moves)
     pkl.dump(train_moves, f)
 
 with open('test_moves.pkl', 'wb') as f:
+    np.random.shuffle(test_moves)
     pkl.dump(test_moves, f)
