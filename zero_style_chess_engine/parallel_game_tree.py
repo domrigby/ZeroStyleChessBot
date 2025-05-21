@@ -183,7 +183,8 @@ class GameTree(Process):
     def __init__(self, save_dir: str, neural_net = None, training: bool =  False,
                  multiprocess: bool = False, process_queue: Queue = None,
                  experience_queue: Queue = None, results_queue: Queue = None,
-                 data_queue: Queue = None, start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
+                 data_queue: Queue = None, start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                 verbose: bool = False):
 
         super().__init__()
 
@@ -222,6 +223,9 @@ class GameTree(Process):
         self.number_sent = 0
         self.number_returned = 0
 
+        # Set verbose
+        self.verbose = verbose
+
         self.curiculum_generator = None if not self.curiculum \
             else LichessCuriculum('/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv')
         print("Lichess Curiculum loaded")
@@ -242,6 +246,9 @@ class GameTree(Process):
         thread_env = chess_moves.ChessEngine()
 
         for idx in range(number_of_expansions):
+
+            if self.verbose:
+                print(f"\rMove = {idx}", end="")
 
             # Thread num is used a draw breaker for early iterations such that they don't search down the same branch
             visited_moves: List[List[Node, int]] = []

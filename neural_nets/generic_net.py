@@ -54,14 +54,14 @@ class GenericNet(nn.Module):
         self.optimiser = Adam(self.parameters(), lr=init_lr, weight_decay=1e-4)
 
         # Initialize the scheduler
-        # self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=2500, gamma=0.99)
-        self.scheduler = lr_scheduler.OneCycleLR(self.optimiser,
-            max_lr              = init_lr * 10,
-            total_steps         = int(250e3),
-            pct_start           = 0.05,        # 5% of steps warming up
-            anneal_strategy     = 'cos',
-            div_factor          = 250,
-            final_div_factor    = 1e4)
+        self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=2500, gamma=0.99)
+        # self.scheduler = lr_scheduler.OneCycleLR(self.optimiser,
+        #     max_lr              = init_lr * 5,
+        #     total_steps         = int(600e3),
+        #     pct_start           = 0.05,        # 5% of steps warming up
+        #     anneal_strategy     = 'cos',
+        #     div_factor          = 25,
+        #     final_div_factor    = 1e4)
 
         # Send to CUDA device
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'

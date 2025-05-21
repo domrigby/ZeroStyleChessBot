@@ -19,7 +19,7 @@ from neural_nets.conv_net import ChessNet
 class ChessDataset(Dataset):
 
     def __init__(self, moves_dir: str, accepted_win_types: List[str] = None, rejected_win_types: List[str] = None,
-                 sample_size: int = 2500000):
+                 sample_size: int = 2500000, random_sample: bool = True):
         """
         Initialize the dataset with data from multiple CSV and PGN files.
         """
@@ -36,12 +36,28 @@ class ChessDataset(Dataset):
         self.move_dirs = glob.glob(moves_dir + '/*')
         self.all_moves: List[str] = []  # List of all pickle files containing precomputed FEN states and moves
 
-        self.sample_dataset()
+        if random_sample:
+            self.sample_dataset()
+        else:
+            self.non_random_dataset_chunk()
+
+        self.chunk_count = 0
 
     def sample_dataset(self):
         with open(self.dataset_path, 'rb') as f:
             pickle_moves = pkl.load(f)
-            self.all_moves = np.random.choice(pickle_moves, self.sample_size)
+            this_sample_size = min(len(pickle_moves), self.sample_size)
+            self.all_moves = np.random.choice(pickle_moves, this_sample_size, replace=False)
+
+    def non_random_dataset_chunk(self):
+
+        lb = self.chunk_count * self.sample_size
+        ub = (self.chunk_count + 1) * self.sample_size
+
+        with open(self.dataset_path, 'rb') as f:
+            pickle_moves = pkl.load(f)
+            ub = min(ub, len(pickle_moves))
+            self.all_moves = pickle_moves[lb:ub]
 
     def __len__(self):
         """
@@ -77,24 +93,24 @@ class ChessDataset(Dataset):
 
         move_tensor[indices] = 1
 
-        # Create the legal move mask
-        self.chess_engine.set_fen(fen)
-        legal_moves = self.chess_engine.legal_moves()
-        legal_move_mask, leg_move_lookup = self.create_legal_move_mask(legal_moves, player)
-
-        if legal_move_mask[torch.unravel_index(move_tensor.argmax(), (70, 8, 8))] != 1:
-            raise RuntimeError(f"Masking tensor does include the move target. \n\tDetails:\n\t\tPlayer = {player}"
-                               f"\n\t\tFEN = {fen}"
-                               f"\n\t\tOriginal move = {data['moves']}"
-                               f"\n\t\tMove = {move}"
-                               f"\n\t\tLegal moves = {[move for move, _ in leg_move_lookup]}")
+        # # Create the legal move mask
+        # self.chess_engine.set_fen(fen)
+        # legal_moves = self.chess_engine.legal_moves()
+        # legal_move_mask, leg_move_lookup = self.create_legal_move_mask(legal_moves, player)
+        #
+        # if legal_move_mask[torch.unravel_index(move_tensor.argmax(), (70, 8, 8))] != 1:
+        #     # raise RuntimeError(f"Masking tensor does include the move target. \n\tDetails:\n\t\tPlayer = {player}"
+        #     #                    f"\n\t\tFEN = {fen}"
+        #     #                    f"\n\t\tOriginal move = {data['moves']}"
+        #     #                    f"\n\t\tMove = {move}"
+        #     #                    f"\n\t\tLegal moves = {[move for move, _ in leg_move_lookup]}")
+        #     return self.__getitem__(np.random.choice(len(self)))
 
         return {
             'state': board_tensor,
             'move': move_tensor,
             'player': player,
-            'value': value,
-            'legal_move_mask': legal_move_mask
+            'value': value
         }
 
     def create_legal_move_mask(self, moves, team):
@@ -133,12 +149,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Parameters
-    batch_size = 32
-    train_file = r'/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/training_moves.pkl'
-    test_file = r"/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/test_moves.pkl"
+    batch_size = 64
 
     # Initialize the network
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=0.001)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=1e-6)
 
     import matplotlib.pyplot as plt
 
@@ -220,37 +234,34 @@ if __name__ == '__main__':
     last_checkpoint_time = time.time()
 
     import glob
-    train_files = glob.glob("/home/dom/Code/chess_bot/neural_nets/data/random_games/train*pkl")
-    test_files = glob.glob("/home/dom/Code/chess_bot/neural_nets/data/random_games/test*pkl")
+    train_files = glob.glob("/home/dom/1TB_drive/chess_data/train*pkl")
+    test_files = glob.glob("/home/dom/1TB_drive/chess_data/test*pkl")
 
-    train_files.append(train_file)
-    test_files.append(test_file)
+
+    # Define the test data set size (these are completely unseen games)
+    test_dataset = ChessDataset(moves_dir=np.random.choice(test_files), sample_size=25000)
+    val_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     # Training loop
     for epoch in range(starting_epoch, 10000):
 
         # Build the datasets
         train_dataset = ChessDataset(moves_dir=np.random.choice(train_files), sample_size=250000)
-        test_dataset = ChessDataset(moves_dir=np.random.choice(test_files), sample_size=5000)
 
         print(f"Train dataset: {len(train_dataset)} samples, Validation dataset: {len(test_dataset)} samples.")
 
         # Create dataloaders for training and validation
         train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=5)
-        val_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
-
         chess_net.train()
         for batch in train_dataloader:
             state_tensor = batch['state']
             move_target_tensor = batch['move']
             value_target = batch['value']
-            legal_move_mask = batch['legal_move_mask']
 
             # Calculate loss
             loss, value_loss, policy_loss = chess_net.loss_function(
                 state_tensor,
-                (value_target.float(), move_target_tensor.float()),
-                legal_move_mask=legal_move_mask
+                (value_target.float(), move_target_tensor.float())
             )
 
             # Update loss values for plotting
@@ -354,7 +365,7 @@ if __name__ == '__main__':
 
         # Update validation loss tracking and plot
         epoch_val_losses.append(avg_val_loss)
-        epoch_val_epochs.append(epoch)
+        epoch_val_epochs.append(batch_counter)
         val_loss_line.set_xdata(epoch_val_epochs)
         val_loss_line.set_ydata(epoch_val_losses)
         ax4.set_xlim(0, epoch + 1)

@@ -34,15 +34,12 @@ class ChessNet(GenericNet):
 
         self.conv_blocks = nn.Sequential(*conv_block_repeats)
 
-        self.policy_head = nn.Sequential(nn.Conv2d(self.num_filters, self.num_filters, kernel_size=3, padding=1),
-                                         nn.LeakyReLU(),
-                                         nn.Conv2d(self.num_filters, self.num_filters, kernel_size=3, padding=1),
-                                         nn.LeakyReLU(),
-                                         nn.BatchNorm2d(self.num_filters),
+        self.policy_head = nn.Sequential(ConvBlock(self.num_filters),
+                                         ConvBlock(self.num_filters),
+                                         ConvBlock(self.num_filters),
                                          nn.Conv2d(self.num_filters, self.output_size[0], kernel_size=3, padding=1))
 
-        self.value_head = nn.Sequential(nn.Conv2d(self.num_filters, self.num_filters, kernel_size=3, padding=1),
-                                     nn.LeakyReLU(),
+        self.value_head = nn.Sequential(ConvBlock(self.num_filters), ConvBlock(self.num_filters),
                                      nn.Conv2d(self.num_filters, 4, kernel_size=3, padding=1),
                                      nn.LeakyReLU(),
                                      nn.Flatten(),
@@ -71,13 +68,13 @@ class ChessNet(GenericNet):
 
         policy = policy.view(policy.size(0), -1)
 
-        if infering:
-            policy = torch.nn.functional.softmax(policy, dim=1)
-
         policy = policy.view(size_pre_flat)
 
-        if infering and legal_move_mask is not None:
+        if legal_move_mask is not None:
             policy = torch.where(legal_move_mask == 1, policy, 0)
+
+        if infering:
+            policy = torch.nn.functional.softmax(policy, dim=1)
 
         return value, policy
 
@@ -87,7 +84,7 @@ class ChessNet(GenericNet):
         target_value, target_policy = target_value.to(self.device, non_blocking=True), target_policy.to(self.device, non_blocking=True)
 
         # Predicted value
-        predicted_value, predicted_policy = self(input_tensor, legal_move_mask, infering=True)
+        predicted_value, predicted_policy = self(input_tensor, legal_move_mask)
 
         if target_value.ndim == 1:
             target_value = target_value.unsqueeze(-1)

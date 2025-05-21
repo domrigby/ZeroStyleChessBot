@@ -14,7 +14,8 @@ class EngineInterface:
         self.chess_net.eval()
 
         # Create the tree and evaluator – note that create_agents returns lists.
-        tree, evaluator, _, _ = create_agents("", 1, 1, 0, self.chess_net, training=False)
+        tree, evaluator, _, _ = create_agents("", 1, 1, 0, self.chess_net,
+                                              training=False, verbose=True)
         self.tree = tree[0]
 
         # Initialize the board (standard starting position)

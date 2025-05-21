@@ -8,7 +8,7 @@ from zero_style_chess_engine.evaluator import NeuralNetHandling
 from zero_style_chess_engine.trainer import TrainingProcess
 
 def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True,
-                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"):
+                  start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", verbose: bool = False):
     """
     This function initialises all the agents and strings and distributes the queues accordingly
     :param num_agents: number of agents
@@ -51,7 +51,7 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
 
         agent = GameTree(save_dir=save_dir, training=training, multiprocess=True, process_queue=process_queue,
                          experience_queue=training_queue, results_queue=results_queue, data_queue=agent_data_queue,
-                         start_state=start_state)
+                         start_state=start_state, verbose=verbose)
 
         agents.append(agent)
         results_queue_dicts[agent.agent_id] = results_queue

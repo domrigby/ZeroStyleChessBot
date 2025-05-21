@@ -4,7 +4,7 @@ import chess_moves
 
 # Initialize the network
 chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=0.001)
-chess_net.load_network("/home/dom/Code/chess_bot/networks/best_model_63.pt")
+chess_net.load_network("/home/dom/Code/chess_bot/networks/best_model_val_186.pt")
 chess_net.eval()
 
 engine = chess_moves.ChessEngine()
@@ -17,7 +17,6 @@ input_tens = engine.fen_to_tensor(fen)
 print("Current player 2 moves from victory:")
 print("\t Value =", chess_net(torch.tensor(input_tens).unsqueeze(0))[0].item())
 
-print("Board flipped:")
 fen = "4r3/1k6/pp3r2/1b2P2p/3R1p2/P1R2P2/1P4PP/6K1 b - - 0 35"
 input_tens = engine.fen_to_tensor(fen)
 print("\t Value =", chess_net(torch.tensor(input_tens).unsqueeze(0))[0].item())
