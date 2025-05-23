@@ -5,7 +5,7 @@ import pandas as pd
 import pickle as pkl
 import numpy as np
 
-csv = pd.read_csv("/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv")
+csv = pd.read_csv("/home/dom/1TB_drive/lichess_db_puzzle_sorted.csv")
 
 board = chess_moves.ChessEngine()
 
@@ -74,7 +74,7 @@ for chunk_idx, file in enumerate(train_files):
         moves = pkl.load(f)
 
     lb = chunk_idx * chunk_size
-    ub = max((chunk_idx + 1) * chunk_size, len(train_moves) + 1)
+    ub = min((chunk_idx + 1) * chunk_size, len(train_moves) + 1)
 
     moves.extend(train_moves[lb:ub])
 

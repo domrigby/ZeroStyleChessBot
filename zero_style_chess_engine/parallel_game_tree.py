@@ -162,6 +162,7 @@ class Node:
         q_max = np.max(local_Qs)
         max_idxs = np.where(local_Qs==q_max)[0]
         chosen_move = np.random.choice(max_idxs)
+        print([(move, Q, P, N) for move, Q, P, N in zip(self.moves, local_Qs, self.Ps, self.Ns)])
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
     @property
@@ -227,7 +228,7 @@ class GameTree(Process):
         self.verbose = verbose
 
         self.curiculum_generator = None if not self.curiculum \
-            else LichessCuriculum('/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv')
+            else LichessCuriculum('/home/dom/1TB_drive/lichess_db_puzzle_sorted.csv')
         print("Lichess Curiculum loaded")
 
     def reset(self, start_state: str = None):
@@ -371,7 +372,7 @@ class GameTree(Process):
             # Increment the visit count and update the total reward
             new_Q = node.R + gamma_factor**idx * reward
 
-            node.Qs[move_idx] = new_Q
+            node.Qs[move_idx] = (node.Ns[move_idx] * node.Qs[move_idx] + new_Q) / (node.Ns[move_idx] + 1)
 
             # Player will choose their best move... maximum Q
             Qs = node.Qs[node.Ns>0]

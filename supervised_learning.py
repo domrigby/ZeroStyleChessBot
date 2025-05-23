@@ -152,7 +152,7 @@ if __name__ == '__main__':
     batch_size = 64
 
     # Initialize the network
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=1e-6)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=1e-3)
 
     import matplotlib.pyplot as plt
 

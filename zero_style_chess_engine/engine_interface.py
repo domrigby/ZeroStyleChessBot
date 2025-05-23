@@ -33,7 +33,13 @@ class EngineInterface:
         if move in self.current_board.legal_moves:
             self.current_board.push(move)
             # Reset the search tree with the updated FEN.
-            self.tree.reset(start_state=self.current_board.fen())
+
+            move_idx = self.tree.root.moves.index(move_uci) if move_uci in self.tree.root.moves else None
+
+            if move_idx is not None and move_idx in self.tree.root.child_nodes:
+                self.tree.root = self.tree.root.child_nodes[move_idx]
+            else:
+                self.tree.reset(start_state=self.current_board.fen())
             return True
         return False
 

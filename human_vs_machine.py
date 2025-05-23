@@ -38,8 +38,8 @@ if __name__ == '__main__':
 
     # ---- Engine Initialization ----
     engine = EngineInterface(
-        network_path=r"/home/dom/Code/chess_bot/networks/best_model_167.pt",
-        rollout_count=10000
+        network_path=r"/networks/strong_model_played_cam.pt",
+        rollout_count=2000
     )
 
     # ---- Pygame Initialization ----

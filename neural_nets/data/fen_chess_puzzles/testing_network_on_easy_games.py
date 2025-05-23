@@ -4,7 +4,7 @@ import chess_moves
 
 # Initialize the network
 chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=0.001)
-chess_net.load_network("/home/dom/Code/chess_bot/networks/best_model_val_186.pt")
+chess_net.load_network("/home/dom/Code/chess_bot/networks/best_model_293.pt")
 chess_net.eval()
 
 engine = chess_moves.ChessEngine()
