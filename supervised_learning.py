@@ -239,11 +239,11 @@ if __name__ == '__main__':
 
 
     # Define the test data set size (these are completely unseen games)
-    test_dataset = ChessDataset(moves_dir=np.random.choice(test_files), sample_size=25000)
+    test_dataset = ChessDataset(moves_dir=np.random.choice(test_files), sample_size=100000)
     val_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     # Training loop
-    for epoch in range(starting_epoch, 10000):
+    for epoch in range(starting_epoch, 500000):
 
         # Build the datasets
         train_dataset = ChessDataset(moves_dir=np.random.choice(train_files), sample_size=250000)

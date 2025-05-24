@@ -37,7 +37,7 @@ if __name__=="__main__":
     # ---- Engine Setup ----
     # Your network-based engine (we'll play White)
     net_engine = EngineInterface(
-        network_path   =r"/networks/strong_model_played_cam.pt",
+        network_path   =r"/home/dom/Code/chess_bot/trained_on_cloud.pt",
         rollout_count  = 2000
     )
 
@@ -49,7 +49,7 @@ if __name__=="__main__":
         "UCI_LimitStrength": True,
         "UCI_Elo":          1320,
     })
-    SF_TIME = 0.2  # seconds per Stockfish move
+    SF_TIME = 1  # seconds per Stockfish move
 
     # Central board for display
     board = chess.Board()
