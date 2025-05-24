@@ -51,10 +51,6 @@ public:
         std::vector<std::string> legal_moves;
         bool sideToMove = white_to_move;  // Save the current side to check king safety later
 
-//        std::cout << white_to_move << std::endl;
-
-
-
         // For each pseudo-legal move, apply it, check if the king is safe, then undo it.
         for (const auto& mv : pseudo_moves) {
             // Apply the move using bitboards; this returns the captured piece (if any)
@@ -636,6 +632,14 @@ private:
     int halfmove_clock = 0;
     int fullmove_number = 1;
 
+    int ep_square = -1;
+    // parsed from the FEN’s third field (e.g. “KQkq”)
+    bool white_can_castle_kingside  = false;
+    bool white_can_castle_queenside = false;
+    bool black_can_castle_kingside  = false;
+    bool black_can_castle_queenside = false;
+
+
     inline void set_piece(Bitboard& board, int rank, int file) {
         board |= square_mask(rank, file);
     }
@@ -654,6 +658,25 @@ private:
         std::istringstream iss(fen);
         std::string board_fen, turn, castling, en_passant, halfmove_s, fullmove_s;
         iss >> board_fen >> turn >> castling >> en_passant >> halfmove_s >> fullmove_s;
+
+        white_to_move   = (turn == "w");
+        halfmove_clock  = std::stoi(halfmove_s);
+        fullmove_number = std::stoi(fullmove_s);
+
+        // --- new ep_square parsing ---
+        if (en_passant != "-") {
+            // e.g. en_passant == "e3"
+            int file = en_passant[0] - 'a';
+            int rank = en_passant[1] - '1';   // FEN rank '1' -> row 0
+            ep_square = rank * 8 + file;
+        } else {
+            ep_square = -1;
+        }
+
+        white_can_castle_kingside  = (castling.find('K') != std::string::npos);
+        white_can_castle_queenside = (castling.find('Q') != std::string::npos);
+        black_can_castle_kingside  = (castling.find('k') != std::string::npos);
+        black_can_castle_queenside = (castling.find('q') != std::string::npos);
 
         // Clear bitboards
         for (int i = 0; i < PIECE_NB; ++i) {
@@ -702,6 +725,24 @@ private:
 
     inline Bitboard square_mask(int rank, int file) const {
         return Bitboard(1) << (rank * 8 + file);
+    }
+
+    /// Returns true if side `attacker_is_white` attacks (r,c)
+    bool is_square_attacked(int r, int c, bool attacker_is_white) {
+        // temporarily switch side and generate all pseudo‐legal moves
+        bool saved = white_to_move;
+        white_to_move = attacker_is_white;
+        std::vector<std::string> opp;
+        generate_moves(opp);
+        white_to_move = saved;
+
+        for (auto &mv : opp) {
+            int tr = mv[3] - '1';
+            int tc = mv[2] - 'a';
+            if (tr == r && tc == c)
+                return true;
+        }
+        return false;
     }
 
 
@@ -815,68 +856,97 @@ private:
 
 
     void generate_pawn_moves(int row, int col, std::vector<std::string>& moves) {
-        // White pawns move upwards (row+1), black pawns move downwards (row-1)
-        int direction = white_to_move ? 1 : -1;
-        int start_row = white_to_move ? 1 : 6;
-        int promotion_row = white_to_move ? 7 : 0;
+        // Direction, starting rank and promotion rank depend on side to move
+        int direction      = white_to_move ? 1 : -1;
+        int start_row      = white_to_move ? 1 : 6;
+        int promotion_row  = white_to_move ? 7 : 0;
 
-        // Compute board occupancy
-        Bitboard occupancy = 0;
+        // Build occupancy and enemy occupancy bitboards
+        Bitboard occupancy = 0, enemyOccupancy = 0;
         for (int i = 0; i < PIECE_NB; ++i) {
             occupancy |= bitboards[i];
+            // Pieces with index >= BLACK_KING are black
+            if (white_to_move ? i >= BLACK_KING : i < WHITE_PAWN)
+                enemyOccupancy |= bitboards[i];
         }
 
-        Bitboard enemyOccupancy = 0;
-        if (white_to_move) {
-            for (int i = BLACK_KING; i <= BLACK_PAWN; ++i) {
-                enemyOccupancy |= bitboards[i];
-            }
-        } else {
-            for (int i = WHITE_KING; i <= WHITE_PAWN; ++i) {
-                enemyOccupancy |= bitboards[i];
-            }
-        }
-
-        // Current pawn bitboard
-        Bitboard pawnSquare = square_mask(row, col);
+        // Ensure there's a pawn of the correct color on (row,col)
+        Bitboard from_bb = square_mask(row, col);
+        Bitboard pawn_bb = white_to_move ? bitboards[WHITE_PAWN] : bitboards[BLACK_PAWN];
+        if (!(pawn_bb & from_bb))
+            return;
 
         // Single forward move
-        int next_row = row + direction;
-        if (next_row >= 0 && next_row < 8) {
-            Bitboard forwardSquare = square_mask(next_row, col);
-            if (!(occupancy & forwardSquare)) {  // Ensure destination is empty
-                if (next_row == promotion_row) {
-                    for (char promo : { 'q', 'r', 'b', 'n' }) {
-                        add_move(row, col, next_row, col, moves, promo);
+        int nr = row + direction;
+        int nc = col;
+        if (nr >= 0 && nr < 8) {
+            Bitboard to_bb = square_mask(nr, nc);
+            // Empty square
+            if (!(occupancy & to_bb)) {
+                // Promotion
+                if (nr == promotion_row) {
+                    for (char promo : {'q', 'r', 'b', 'n'}) {
+                        std::string mv;
+                        mv += char('a' + col);
+                        mv += char('1' + row);
+                        mv += char('a' + nc);
+                        mv += char('1' + nr);
+                        mv += promo;
+                        moves.push_back(mv);
                     }
                 } else {
-                    add_move(row, col, next_row, col, moves);
-
-                    // Double forward move if still on start row
+                    // Non-promotion single push
+                    std::string mv = {char('a' + col), char('1' + row), char('a' + nc), char('1' + nr)};
+                    moves.push_back(mv);
+                    // Double push from starting rank
                     if (row == start_row) {
-                        int double_row = next_row + direction;
-                        Bitboard doubleSquare = square_mask(double_row, col);
-                        if (!(occupancy & doubleSquare)) {
-                            add_move(row, col, double_row, col, moves);
+                        int nn = nr + direction;
+                        if (nn >= 0 && nn < 8) {
+                            Bitboard dbl_bb = square_mask(nn, nc);
+                            if (!(occupancy & dbl_bb)) {
+                                std::string mv2 = {char('a' + col), char('1' + row), char('a' + nc), char('1' + nn)};
+                                moves.push_back(mv2);
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Captures
-        for (int offset : {-1, 1}) {
-            int diag_col = col + offset;
-            if (diag_col >= 0 && diag_col < 8 && next_row >= 0 && next_row < 8) {
-                Bitboard diagSquare = square_mask(next_row, diag_col);
-                if (enemyOccupancy & diagSquare) {
-                    if (next_row == promotion_row) {
-                        for (char promo : { 'q', 'r', 'b', 'n' }) {
-                            add_move(row, col, next_row, diag_col, moves, promo);
+        // Captures and promotion-captures
+        for (int dc : {-1, +1}) {
+            int cr = row + direction;
+            int cc = col + dc;
+            if (cr >= 0 && cr < 8 && cc >= 0 && cc < 8) {
+                Bitboard cap_bb = square_mask(cr, cc);
+                // Normal capture
+                if (enemyOccupancy & cap_bb) {
+                    if (cr == promotion_row) {
+                        // Promotion capture
+                        for (char promo : {'q', 'r', 'b', 'n'}) {
+                            std::string mv;
+                            mv += char('a' + col);
+                            mv += char('1' + row);
+                            mv += char('a' + cc);
+                            mv += char('1' + cr);
+                            mv += promo;
+                            moves.push_back(mv);
                         }
                     } else {
-                        add_move(row, col, next_row, diag_col, moves);
+                        // Non-promotion capture
+                        std::string mv = {char('a' + col), char('1' + row), char('a' + cc), char('1' + cr)};
+                        moves.push_back(mv);
                     }
+                }
+                // En-passant capture (if ep_square is set correctly)
+                else if (ep_square != -1 && cr * 8 + cc == ep_square) {
+                    std::string mv = {
+                        char('a' + col),
+                        char('1' + row),
+                        char('a' + cc),
+                        char('1' + cr)
+                    };
+                    moves.push_back(mv);
                 }
             }
         }
