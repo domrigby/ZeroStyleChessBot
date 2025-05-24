@@ -38,7 +38,7 @@ if __name__ == '__main__':
 
     # ---- Engine Initialization ----
     engine = EngineInterface(
-        network_path=r"/networks/strong_model_played_cam.pt",
+        network_path=r"example_network.pt",
         rollout_count=2000
     )
 
