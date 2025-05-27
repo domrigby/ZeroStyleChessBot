@@ -24,7 +24,7 @@ class DataPoint:
 
 class Memory:
 
-    def __init__(self, length_buffer, preload_data: str = None, num_agents: int = 1):
+    def __init__(self, length_buffer, preload_data: str = None, num_agents: int = 1, ):
 
         # Save the states
         self.data: List[DataPoint] = []
@@ -95,6 +95,7 @@ class Memory:
         return states, moves, probs, wins
 
     def end_game(self, last_node: DataPoint, winner: str):
+
         node = last_node
 
         while node.parent_datapont:
@@ -103,12 +104,6 @@ class Memory:
                     last_node.win_val = 1
                 else:
                     last_node.win_val = -1
-
-    def load_data(self, path: str = "neural_nets/data/games.pkl", sample_size: int = 100000):
-        # Slow but we only do it once
-        with open(path, "rb") as f:
-            moves = pkl.load(f)
-        self.data = moves
 
     def load_directory(self):
         path = r"neural_nets/generated_data"

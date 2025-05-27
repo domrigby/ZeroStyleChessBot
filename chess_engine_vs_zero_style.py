@@ -38,7 +38,7 @@ if __name__=="__main__":
     # Your network-based engine (we'll play White)
     net_engine = EngineInterface(
         network_path   =r"neural_nets/example_network.pt",
-        rollout_count  = 20000
+        num_rollouts   = 2000
     )
 
     # Stockfish (Black).  Adjust to your binary path:

@@ -162,7 +162,6 @@ class Node:
         q_max = np.max(local_Qs)
         max_idxs = np.where(local_Qs==q_max)[0]
         chosen_move = np.random.choice(max_idxs)
-        print([(move, Q, P, N) for move, Q, P, N in zip(self.moves, local_Qs, self.Ps, self.Ns)])
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
     @property
@@ -172,7 +171,6 @@ class Node:
 
 class GameTree(Process):
 
-    add_dirichlet_noise = True
     save_non_root_states = False
     save_images_of_checkmates = True
     full_rollout_virtual_loss = False
@@ -185,7 +183,8 @@ class GameTree(Process):
                  multiprocess: bool = False, process_queue: Queue = None,
                  experience_queue: Queue = None, results_queue: Queue = None,
                  data_queue: Queue = None, start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                 verbose: bool = False):
+                 verbose: bool = False, inference_mode: bool = None,
+                 infering_mode_queue: Queue = None, send_results_queue: Queue = None):
 
         super().__init__()
 
@@ -202,18 +201,26 @@ class GameTree(Process):
         # Local count for the number of memories we've saved
         self.saved_memory_local = 0
 
+        #  Save multi-processing stuff
         self.neural_net = None
         if not self.multiprocess:
+            self.environment = chess_moves.ChessEngine()
             self.neural_net = neural_net
             self.memory = Memory(100000)
         else:
             # Link the queues
+            self.environment = None
             self.process_queue = process_queue
             self.process_queue_node_lookup: Dict[int, tuple] = {}
 
             self.experience_queue = experience_queue
             self.results_queue = results_queue
             self.data_queue = data_queue
+
+        self.inference_mode: bool = inference_mode
+        if self.inference_mode:
+            self.inference_mode_queue: Queue = infering_mode_queue
+            self.send_results_queue: Queue = send_results_queue
 
         # Initiate root
         self.root = None
@@ -227,9 +234,12 @@ class GameTree(Process):
         # Set verbose
         self.verbose = verbose
 
+        # Generate the curriculum
         self.curiculum_generator = None if not self.curiculum \
             else LichessCuriculum('/home/dom/1TB_drive/lichess_db_puzzle_sorted.csv')
-        print("Lichess Curiculum loaded")
+
+        # Reset the engine
+        self.reset()
 
     def reset(self, start_state: str = None):
         if start_state is None:
@@ -240,11 +250,11 @@ class GameTree(Process):
 
         end_nodes: List[Node] = []
 
+        if self.environment is None:
+            self.environment = chess_moves.ChessEngine()
+
         if current_node is None:
             current_node: Node = self.root
-
-        # Initialise the threads env
-        thread_env = chess_moves.ChessEngine()
 
         for idx in range(number_of_expansions):
 
@@ -303,7 +313,7 @@ class GameTree(Process):
                         current_node.parent_node.virtual_losses[current_node.move_idx] = -1
 
                 # If the graph is complete its already been done
-                current_node, reward, done = current_node.expand(move_idx, thread_env, state=current_node.state)
+                current_node, reward, done = current_node.expand(move_idx, self.environment, state=current_node.state)
 
                 if not self.multiprocess:
                     value = self.neural_net.node_evaluation(current_node)
@@ -342,6 +352,28 @@ class GameTree(Process):
 
                 if current_node.branch_complete and current_node.game_over_type is not GameOverType.NO_TAKES_DRAW:
                     end_nodes.append(current_node)
+
+                if self.inference_mode:
+                    try:
+                        result = self.send_results_queue.get_nowait()
+                        if result['send_result']:
+                            self.inference_mode_queue.put((self.root.Ns, self.root.Qs, self.root.moves))
+                        if result['move_to_push']:
+                            print("MOVE RECEIVED")
+                            move_idx = self.root.moves.index(result['move_to_push'])
+
+                            if move_idx not in self.root.child_nodes.keys():
+                                # This occassionally happens when engine takes too long to intialise and then user plays move very quickly
+                                new_state: str = self.environment.push(self.root.state, self.root.moves[move_idx])
+                                self.root.child_nodes[move_idx] = Node(new_state, move_idx=move_idx, board=self.environment,
+                                                                        parent_node=self.root)
+                                print("NEW NODE CREATED")
+                                print(move_idx, self.root.child_nodes)
+                            #  Make this become the new root node
+                            self.root = self.root.child_nodes[move_idx]
+
+                    except Empty:
+                        pass
 
             # Now return to root node
             current_node = self.root
@@ -532,7 +564,7 @@ class GameTree(Process):
                     Ps = np.ones_like(Ps) / len(Ps)  # Assign uniform probability if sum is too small
 
                 # Apply Dirichlet noise
-                if self.add_dirichlet_noise:
+                if self.training:
                     dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
                     Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
 
@@ -570,7 +602,14 @@ class GameTree(Process):
         self.memory.end_game(white_win)
 
     def run(self):
-        self.train()
+        self.environment = chess_moves.ChessEngine()
+
+        if not self.inference_mode:
+            self.train()
+        else:
+            print("Beginning infinite rollouts")
+            while True:
+                self.parallel_search(self.root, int(10e25))
 
     @error_logger
     def train(self, n_games: int = 1000000):
@@ -624,10 +663,6 @@ class GameTree(Process):
                 main_board.push(chess_move)
 
                 print(f"Agent {self.agent_id} Game {game_count} Move: {move_count}")
-                # print("Board:")
-                # print(main_board)
-                #
-                # print(f"FEN String: {main_board.fen()}")
 
                 if main_board.is_checkmate():
 
@@ -685,5 +720,6 @@ class GameTree(Process):
     def send_update_to_main_thread(self, white_win: bool, game_length: int):
         game_data_dict = {'white_win': white_win, 'game_length': game_length}
         self.data_queue.put_nowait(game_data_dict)
+
 
 

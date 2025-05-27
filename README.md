@@ -38,7 +38,7 @@ Training followed the following steps:
      3. **Data selection**: it is important to try and not introduce any biases from the dataset.
      4. **Training and validation**: the model was trained on this data to predict the correct move (one hot encoded) as well as the winner of the game.
         Validation was performed on a mixture of Grandmaster games and Lichess puzzles.
-2. **Model distillation**
+2. **[PENDING] Model distillation**
    * The model I trained on the rented 3090 was prohibitively slow on my puny RTX 1050. I therefore decided to try and distill this model
    model down to a lighter network.
 3. **Fine-tuning via reinforcement learning**:
