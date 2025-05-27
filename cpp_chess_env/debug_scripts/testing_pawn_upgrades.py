@@ -29,7 +29,7 @@ def test_chess_engine():
     assert flipped_move == "h2h1q", f"Expected flipped move 'h2h1q', but got '{flipped_move}'."
 
     # Test generate_pawn_moves
-    fen = "8/4P3/8/8/8/8/3P4/k6K w - - 0 1"
+    fen = "8/6P1/8/8/8/8/8/8 w - - 0 1"
     engine.set_fen(fen)
     moves = engine.legal_moves()
     print(moves)

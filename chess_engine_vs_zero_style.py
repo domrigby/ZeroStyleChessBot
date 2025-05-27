@@ -37,8 +37,8 @@ if __name__=="__main__":
     # ---- Engine Setup ----
     # Your network-based engine (we'll play White)
     net_engine = EngineInterface(
-        network_path   =r"example_network.pt",
-        rollout_count  = 2000
+        network_path   =r"neural_nets/example_network.pt",
+        rollout_count  = 20000
     )
 
     # Stockfish (Black).  Adjust to your binary path:
@@ -47,9 +47,9 @@ if __name__=="__main__":
     # Optionally cap strength:
     sf_engine.configure({
         "UCI_LimitStrength": True,
-        "UCI_Elo":          1800,
+        "UCI_Elo":          1320,
     })
-    SF_TIME = 2.5  # seconds per Stockfish move
+    SF_TIME = 10.0  # seconds per Stockfish move
 
     # Central board for display
     board = chess.Board()

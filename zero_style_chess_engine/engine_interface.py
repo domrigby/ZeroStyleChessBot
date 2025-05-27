@@ -34,6 +34,14 @@ class EngineInterface:
             self.current_board.push(move)
             # Reset the search tree with the updated FEN.
 
+            castling_moves = {'e1g1': 'O-O',  # White kingside
+                'e1c1': 'O-O-O',  # White queenside
+                'e8g8': 'O-O',  # Black kingside
+                'e8c8': 'O-O-O'}  # Black queenside
+
+            if move_uci in castling_moves.keys():
+                move_uci = castling_moves[move_uci]
+
             move_idx = self.tree.root.moves.index(move_uci) if move_uci in self.tree.root.moves else None
 
             if move_idx is not None and move_idx in self.tree.root.child_nodes:

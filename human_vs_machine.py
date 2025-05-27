@@ -38,7 +38,10 @@ if __name__ == '__main__':
 
     # ---- Engine Initialization ----
     engine = EngineInterface(
-        network_path=r"example_network.pt",
+        network_path=r"neural_nets/example_network"
+                     r""
+                     r""
+                     r".pt",
         rollout_count=2000
     )
 
