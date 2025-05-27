@@ -25,8 +25,9 @@ Linux:
 
 If this fails, try running ```bash cpp_chess_env/install_cmake.sh``` to ensure cmake is installed
 
-## Play
-Run ```human_vs_machine.py```
+## Play Against It
+Run ```human_vs_machine.py```. A pygame screen with a chess board will appear. You are white. To make a move, click and drag a piece 
+and an arrow should appear. Once you are happy with your move, click confirm move.
 
 ## Training
 Training followed the following steps:
