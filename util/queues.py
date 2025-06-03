@@ -9,7 +9,7 @@ from zero_style_chess_engine.trainer import TrainingProcess
 
 def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_trainers: int, network, training: bool = True,
                   start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", verbose: bool = False,
-                  inference_mode_queue: Queue = None, send_results_queue: List[Queue] = None):
+                  inference_mode_queue: Queue = None, send_results_queue: List[Queue] = None, expert_data_path: str = None):
     """
     This function initialises all the agents and strings and distributes the queues accordingly
     :param num_agents: number of agents
@@ -78,6 +78,6 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
         data_queues['training'].append(training_data_queue)
         trainers.append(TrainingProcess(save_dir=save_dir ,neural_net=network, experience_queues=training_queues[idx],
                                         batch_size=128, num_agents=num_agents, data_queue=training_data_queue,
-                                        weights_queue=weights_queue, min_num_batches_to_train=1))
+                                        weights_queue=weights_queue, min_num_batches_to_train=1, load_path=expert_data_path))
 
     return agents, evaluators, trainers, data_queues

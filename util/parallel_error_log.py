@@ -1,3 +1,4 @@
+import os
 import traceback
 
 def error_logger(func):
@@ -7,11 +8,12 @@ def error_logger(func):
         try:
             return func(self, *args, **kwargs)
         except Exception as e:
-            if hasattr(self, "log_file_name"):
-                log_file = self.log_file_name  # Get filename from the class property
-            else:
-                log_file = "default_log.txt"  # Fallback filename
+            log_file = getattr(self, "log_file_name", "default_log.txt")
 
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+            # Write to log file
             with open(log_file, "a") as f:
                 f.write(f"Error in {func.__name__}: {str(e)}\n")
                 f.write(traceback.format_exc() + "\n")

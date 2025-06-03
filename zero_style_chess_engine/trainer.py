@@ -29,6 +29,7 @@ class TrainingProcess(Process):
         self.save_dir = save_dir
         self.log_file_name = os.path.join(save_dir, f"{self.__class__.__name__}.txt")
 
+        #  Set up the queues
         self.experience_queue = experience_queues
         self.data_queue = data_queue
         self.weights_queue = weights_queue
@@ -45,10 +46,11 @@ class TrainingProcess(Process):
 
         self.neural_net = neural_net
 
-        self.memory = Memory(1000000, num_agents=num_agents, preload_data=load_path)
+        self.memory = Memory(1000000, num_agents=num_agents, expert_data_path=load_path)
 
         self.update_period = 25
 
+        #  Set up loss plotting windows
         self.value_loss_window = np.zeros(self.update_period)
         self.pol_loss_window = np.zeros(self.update_period)
         self.total_loss_window = np.zeros(self.update_period)
@@ -119,7 +121,7 @@ class TrainingProcess(Process):
         if len(self.memory) < self.min_num_batches_to_train * self.batch_size:
             return
 
-        states, moves, probs, wins = self.memory.get_batch(self.batch_size)
+        states, moves, probs, wins = self.memory.get_batch(self.batch_size, 0.5)
         state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
         total_loss, value_loss, pol_loss = self.neural_net.loss_function(state, target=(wins, moves),
                                                                          legal_move_mask=legal_move_mask)

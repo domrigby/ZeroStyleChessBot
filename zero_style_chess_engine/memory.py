@@ -1,4 +1,3 @@
-from torch.utils.data import Dataset, DataLoader
 from typing import List, Dict, Optional
 import numpy as np
 from enum import Enum
@@ -24,7 +23,7 @@ class DataPoint:
 
 class Memory:
 
-    def __init__(self, length_buffer, preload_data: str = None, num_agents: int = 1, ):
+    def __init__(self, length_buffer, expert_data_path: str = None, num_agents: int = 1, ):
 
         # Save the states
         self.data: List[DataPoint] = []
@@ -33,20 +32,21 @@ class Memory:
         self.turn_list: List[DataPoint] = []
 
         self.index = 0
-
         self.games_played = 0
-
         self.max_len = length_buffer
 
         self.last_moves: Dict[int, Optional[DataPoint]] = {}
         for agent_num in range(num_agents):
             self.last_moves[agent_num] = None
 
-        if preload_data is not None:
-            self.load_data(preload_data)
+        # Deal with expert data
+        self.expert_data = []
+        if expert_data_path is not None:
+            self.load_expert_data(expert_data_path)
 
+        #  Load data from previous games
         self.load_directory()
-
+        #  Get the length of the current data
         self.last_index_saved = len(self.data)
 
     def __len__(self):
@@ -81,8 +81,25 @@ class Memory:
             self.data.append(data_point)
             parent_move = data_point
 
-    def get_batch(self, batch_size: int = 32):
+    def get_batch(self, batch_size: int = 32, expert_ratio: float = 1.):
 
+        # Set batch size for real and expert data
+        real_batch = round(batch_size * expert_ratio)
+        expert_batch = batch_size - real_batch
+
+        # Retrieve the batch
+        batch = []
+        batch.extend(self.get_real_data_batch(batch_size=real_batch))
+        batch.extend(self.get_expert_batch(batch_size=expert_batch))
+        return batch
+
+
+    def get_real_data_batch(self, batch_size: int = 32):
+        """
+        Generate a random batch of data
+        :param batch_size: size of the batch
+        :return:
+        """
         idxs = np.random.choice(len(self.data), batch_size)
 
         batch_data = [self.data[idx] for idx in idxs]
@@ -106,8 +123,13 @@ class Memory:
                     last_node.win_val = -1
 
     def load_directory(self):
+        """
+        Function loads data from previous runs
+        :return:
+        """
         path = r"neural_nets/generated_data"
         files = glob.glob(os.path.join(path, "*.pkl"))
+
         for file in files:
             with open(file, 'rb') as f:
                 moves = pkl.load(f)
@@ -121,3 +143,38 @@ class Memory:
         with open(file_path, 'wb') as f:
             pkl.dump(self.data[self.last_index_saved:], f)
         self.last_index_saved = len(self.data)
+
+    def load_expert_data(self, path: str, file_format: str = "pkl", max_len: int = 250000):
+        """
+        Collect a certain amount of expert data from the expert data directory. Data should be in the form given by networks/data
+        :param path: path to directory
+        :param file_format: format the data is in
+        :param max_len: maximum number to retrieve
+        :return:
+        """
+        files = glob.glob(os.path.join(path, "*" + file_format))
+        num_collected = 0
+        for file in files:
+            with open(file, 'rb') as f:
+                moves = pkl.load(f)
+                self.expert_data.extend(moves)
+                num_collected += len(moves)
+            if num_collected >= max_len:
+                break
+
+    def get_expert_batch(self, batch_size: int = 32):
+        """
+        Generate a random batch of data
+        :param batch_size: size of the batch
+        :return:
+        """
+        idxs = np.random.choice(len(self.expert_data), batch_size)
+
+        batch_data = [self.expert_data[idx] for idx in idxs]
+
+        states = [turn['fen'] for turn in batch_data]
+        moves = [turn['moves'] for turn in batch_data]
+        probs = moves
+        wins = [turn['value'] for turn in batch_data]
+
+        return states, moves, probs, wins

@@ -580,7 +580,6 @@ class GameTree(Process):
                 return
 
 
-
     def train_neural_network_local(self):
         if len(self.memory) < 32:
             return

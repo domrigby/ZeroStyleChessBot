@@ -31,11 +31,13 @@ if __name__ == "__main__":
 
     folder_name = "/home/dom/Code/chess_bot/sessions/run_at_20250515_210942"
 
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.001)
-    chess_net.load_network("/home/dom/Code/chess_bot/test.pt")
+    # Init with a very low learning rate as we are tuning
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=2e-6)
+    chess_net.load_network("neural_nets/example_network.pt")
     chess_net.share_memory()
 
-    agents, evaluators, trainers, data_queues_dicts = create_agents(folder_name, NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS, chess_net)
+    agents, evaluators, trainers, data_queues_dicts = create_agents(folder_name, NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS, chess_net,
+                                                                    expert_data_path="/home/dom/1TB_drive/chess_data")
 
     [trainer.start() for trainer in trainers]
     [eval.start() for eval in evaluators]
