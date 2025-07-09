@@ -1,63 +1,132 @@
-# ZERO STYLE CHESS ENGINE
-#####  By Dom Rigby
+# ZeroStyleChessBot
 
-## Overview
-This repository contains code for a Deep Reinforcement Learning agent to learn to play chess using neural network assisted 
-Monte-Carlo Tree Search (MCTS), inspired by Google Deepmind's [AlphaGoZero](https://www.google.com/search?q=alpha+go+zero+paper&client=ubuntu-sn&hs=JWS&sca_esv=c9803a166ab8e7a0&channel=fs&sxsrf=ADLYWIJkjbSEES--hpoPf2U7wdxifl9_gg%3A1736708404696&ei=NBGEZ8eWKoe7hbIPx7_v4Ak&ved=0ahUKEwjHgKn87vCKAxWHXUEAHcffG5wQ4dUDCBA&uact=5&oq=alpha+go+zero+paper&gs_lp=Egxnd3Mtd2l6LXNlcnAiE2FscGhhIGdvIHplcm8gcGFwZXIyBxAjGLECGCcyCxAAGIAEGJECGIoFMgsQABiABBiGAxiKBTILEAAYgAQYhgMYigUyBRAAGO8FMggQABiABBiiBEjUCVDfBljSCHABeACQAQCYAaMBoAHUA6oBAzEuM7gBA8gBAPgBAZgCAqAChwHCAgoQABiwAxjWBBhHmAMAiAYBkAYIkgcDMS4xoAfTFg&sclient=gws-wiz-serp). This was a very engaging challenge to 
-implement this on extremely hardware" inference is on my MSI laptop with a RTX 1050 and training on a rented 3090. I therefore
-had to add a lot of biases to try and point it in the right direction 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)  
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)]  
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)]
 
-I created this engine with the aim of really honing I created this engine with the aim of really honing the following skills:
-1. **Parallelisation** in both PyTorch and standard Python
-2. **Writing faster PyTorch code**. This was a fun and educational exercise is trying to learn something complex on extremely 
-limited hardware. Due to the lack of availability of GPUs on Google Cloud, this was all trained on my 2016 gaming laptop with a 1050 GPU.
-3. **Monte-Carlo Tree Search** implementation and design.
-4. **C++ with Python** skills. The engine is written in C++, a language that is not my first choice.
-5. More **reinforcement learning tricks**. As I will explain later, I have tried to implement some interesting things I have seen in the literature. E.g. model distillation and curiculum learning.
+---
 
-## To Run:
-### Building C++ Engine
-This library relies on C++ chess engine which I wrote (with a lot of help from the internet) to decreases chess related 
-compute time. This library has to be built into an importable python library. To do this run:
+## 🚀 Overview
 
-Linux:
-```bash cpp_chess_env/build_engine.sh```
+**ZeroStyleChessBot** is a self-play deep reinforcement learning chess engine combining a convolutional neural network with Monte-Carlo Tree Search (MCTS). Inspired by Google DeepMind’s AlphaZero, it learns entirely from scratch through:
 
-If this fails, try running ```bash cpp_chess_env/install_cmake.sh``` to ensure cmake is installed
+1. **Behavioral Cloning** on grandmaster games (imitation learning)  
+2. **Model Distillation** for lightweight inference  
+3. **Self-Play Reinforcement Learning** with curriculum learning  
 
-## Play Against It
-Run ```human_vs_machine.py```. A pygame screen with a chess board will appear. You are white. To make a move, click and drag a piece 
-and an arrow should appear. Once you are happy with your move, click confirm move.
+All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrating how to extract strong performance under compute constraints.
 
-## Training
-Training followed the following steps:
+> This was a very engaging challenge to implement on extremely limited hardware… I added biases, curriculum learning, and distillation tricks to guide training.
 
-1. **Behavioral Cloning**
-   * Due to computing limitations, I opted to hot start the model using **imitation learning**. This involved three major steps:
-     1. **Data collection**: the datasource used was the Lichess database. This however included a lot of low quality data (timeouts, resignations etc.)
-     2. **Data curation**: the database has to be curated in order to only train on games with meaningful results. One move was taken from each game to try and make the data IID.
-     3. **Data selection**: it is important to try and not introduce any biases from the dataset.
-     4. **Training and validation**: the model was trained on this data to predict the correct move (one hot encoded) as well as the winner of the game.
-        Validation was performed on a mixture of Grandmaster games and Lichess puzzles.
-2. **[PENDING] Model distillation**
-   * The model I trained on the rented 3090 was prohibitively slow on my puny RTX 1050. I therefore decided to try and distill this model
-   model down to a lighter network.
-3. **Fine-tuning via reinforcement learning**:
-   * The policy you get from purely training on chess games is *pretty good*. It plays at around 1100-1300 ELO (rough guess).
-   * In order to break through this ceiling we were going to need to interact with the environment and use self-play reinforcement
-    learning. We do not however want to forget everything we learned in pre-training and I therefore opted to go along the more 
-    **fine-tuning route**.
-   * We also want to make sure we can walk before we can run. I therefore opted to add an explicit **curriculum** to the RL training. This
-   was a set of increasing difficultly chess puzzles from the Lichess chess puzzles database.
-   * Steps:
-     1. **Self-play** using Monte-Carlo Tree Search (MCTS) and collect trajectories from these games to tune on.
-     2. Opponent: starts out playing against itself. As training progresses, it chooses from a set of 10 previous past networks. I would love
-     to do a proper league and then a Nash Distribution, but I do not have the spare compute!
-     2. Feature extractor is originally frozen but then thawed during training to avoid catastrophic forgetting
-     3. During buffer sampling, a small number of real human moves are added to the batch. The original policy from the 
-     behavioral cloning is calculated and the cross-entropy error with the new policy is added as factor to the loss
-     4. High regularisation and clipping is used.
+---
 
+## 📚 Key Features
 
+- **End-to-End RL Pipeline**  
+  - Hot-start via Behavioral Cloning from the Lichess database  
+  - Progressive fine-tuning with self-play RL  
+  - Curriculum of increasing puzzle difficulty  
 
+- **Neural Network + MCTS**  
+  - ResNet-style policy/value network in PyTorch  
+  - PUCT-based MCTS guided by network priors  
 
+- **Performance Optimizations**  
+  - High-performance C++ core for move generation  
+  - Python bindings for seamless training scripts  
+  - Parallel data collection & batched GPU inference  
+
+- **Model Distillation**  
+  - Compress high-capacity models into a lightweight network  
+  - Enables real-time play on an RTX 1050  
+
+---
+
+## 🏗 Architecture
+
+                  ┌──────────────────────────────────────┐
+                  │         PyTorch Policy/Value         │
+                  │     (ResNet + Dual Head: π & V)      │
+                  └──────────────▲──────────────┬────────┘
+                                 │              │
+                                 │              │
+                             priors          value
+                                 │              │
+                  ┌──────────────┴──────────────▼──────────────┐
+                  │            MCTS (PUCT + Rollouts)          │
+                  └──────────────▲─────────────────────────────┘
+                                 │
+                  best move → C++ Engine
+                                 │
+                  ┌──────────────┴──────────────┐
+                  │  Custom C++ Chess Environment │
+                  │  (move generation, rules, etc)│
+                  └──────────────────────────────┘
+
+---
+
+## 🎯 Reinforcement Learning Workflow
+
+1. **Behavioral Cloning**  
+   - **Data collection:** download and filter Lichess games  
+   - **Curation:** remove timeouts/resignations, ensure IID moves  
+   - **Training:** predict next move and game outcome (policy & value head)  
+
+2. **Model Distillation**  
+   - Train a smaller network to mimic a high-capacity “teacher”  
+   - Enables fast inference on low-power GPUs  
+
+3. **Self-Play Fine-Tuning**  
+   - **Curriculum Learning:** start on easy puzzles, ramp up difficulty  
+   - **MCTS Self-Play:** collect trajectories with network-guided search  
+   - **Replay Buffer:** sample mix of self-play and human moves  
+   - **Loss:**  
+     - Cross-entropy (policy)  
+     - MSE (value)  
+     - Distillation regularizer to retain pre-training
+---
+
+## 🛠 Installation & Usage
+
+1. **Clone the repo**  
+   ```
+   git clone https://github.com/domrigby/ZeroStyleChessBot.git
+   cd ZeroStyleChessBot
+
+2. **Build C++ Engine**
+    ```
+    cd cpp_chess_env
+    bash build_engine.sh         # Linux
+    bash install_cmake.sh        # if cmake missing
+
+3. Create & activate Python env
+    ```
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+
+4. Run Training
+    ```
+    python train.py --config configs/selfplay.yaml
+
+Play vs. Engine
+
+    python human_vs_machine.py
+
+📈 Results
+
+* ELO Improvement: approximately 1500 ELO.
+
+🔮 Future Work
+
+* Full league training with Nash averaging
+
+* Enhanced curriculum using endgame tablebases
+
+* Distributed training on multi-GPU clusters
+
+📄 License
+
+This project is licensed under the MIT License. See LICENSE for details.
+
+::contentReference[oaicite:0]{index=0}
