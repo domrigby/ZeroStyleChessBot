@@ -25,11 +25,9 @@ if __name__ == "__main__":
     NUM_AGENTS = 3
 
     now = datetime.now()  # Get the current date and time
-    # datetime_string = now.strftime("run_at_%Y%m%d_%H%M%S")  # Format as string
-    # folder_name = f"sessions/{datetime_string}"
-    # os.mkdir(folder_name)
-
-    folder_name = "/home/dom/Code/chess_bot/sessions/run_at_20250515_210942"
+    datetime_string = now.strftime("run_at_%Y%m%d_%H%M%S")  # Format as string
+    folder_name = f"sessions/{datetime_string}"
+    os.mkdir(folder_name)
 
     # Init with a very low learning rate as we are tuning
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=2e-6)

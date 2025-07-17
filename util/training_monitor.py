@@ -20,6 +20,8 @@ class ChessEngineMonitor:
 
         self.iteration = 0  # Tracks the iteration for x-axis in TensorBoard
 
+        print(f"Tensorboard command: \ntensorboard --logdir={save_dir}")
+
     def update_wins(self, white_win):
         if white_win:
             self.win_counts["White Wins"] += 1
