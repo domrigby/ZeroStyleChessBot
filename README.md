@@ -8,11 +8,11 @@
 
 ## 🚀 Overview
 
-**ZeroStyleChessBot** is a self-play deep reinforcement learning chess engine combining a convolutional neural network with Monte-Carlo Tree Search (MCTS). Inspired by Google DeepMind’s AlphaZero, it learns entirely from scratch through:
+**ZeroStyleChessBot** is a self-play deep reinforcement learning chess engine combining a convolutional neural network 
+with Monte-Carlo Tree Search (MCTS). Inspired by Google DeepMind’s AlphaZero, it learns to play through:
 
-1. **Behavioral Cloning** on grandmaster games (imitation learning)  
-2. **Model Distillation** for lightweight inference  
-3. **Self-Play Reinforcement Learning** with curriculum learning  
+1. **Behavioral Cloning** on mixed quality games (imitation learning)
+2. **Self-Play Reinforcement Learning** with curriculum learning  
 
 All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrating how to extract strong performance under compute constraints.
 
@@ -116,6 +116,10 @@ Play vs. Engine
 📈 Results
 
 * ELO Improvement: approximately 1500 ELO.
+
+# Interesting Observation
+
+The engine 
 
 🔮 Future Work
 

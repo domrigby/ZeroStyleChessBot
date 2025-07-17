@@ -47,9 +47,9 @@ if __name__=="__main__":
     # Optionally cap strength:
     sf_engine.configure({
         "UCI_LimitStrength": True,
-        "UCI_Elo":          1320,
+        "UCI_Elo":          1600,
     })
-    SF_TIME = 10.0  # seconds per Stockfish move
+    SF_TIME = 1.0  # seconds per Stockfish move
 
     # Central board for display
     board = chess.Board()
