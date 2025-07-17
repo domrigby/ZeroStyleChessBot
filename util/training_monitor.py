@@ -1,6 +1,7 @@
 import os
 import json
 from torch.utils.tensorboard import SummaryWriter
+import numpy as np
 
 
 class ChessEngineMonitor:
@@ -38,7 +39,7 @@ class ChessEngineMonitor:
         self.game_lengths.append(new_length)
         avg_length = sum(self.game_lengths) / len(self.game_lengths)
         self.writer.add_scalar("Game Length/Average", avg_length, self.iteration)
-        self.writer.add_histogram("Game Length/Histogram", self.game_lengths, self.iteration)
+        self.writer.add_histogram("Game Length/Histogram", np.array(self.game_lengths), self.iteration)
 
     def update_losses(self, total_loss, value_loss, policy_loss):
         self.loss_history["Total Loss"].append(total_loss)

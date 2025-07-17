@@ -12,6 +12,7 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
                   inference_mode_queue: Queue = None, send_results_queue: List[Queue] = None, expert_data_path: str = None):
     """
     This function initialises all the agents and strings and distributes the queues accordingly
+    TOOD: get rid of this
     :param num_agents: number of agents
     :param num_evaluators: number of evaluators
     :param num_trainers: number of trainers

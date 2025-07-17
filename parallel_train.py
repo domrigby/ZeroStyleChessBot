@@ -15,19 +15,26 @@ class ParallelMonitor:
 if __name__ == "__main__":
     try:
        mp.set_start_method('spawn', force=True)
-       print("spawned")
+       print("Multi-processing spawned.")
     except RuntimeError:
         print("Failed to spawn")
         pass
 
-    NUM_EVALUATORS = 1
-    NUM_TRAINERS = 1
-    NUM_AGENTS = 3
+    NUM_EVALUATORS: int = 1
+    NUM_TRAINERS: int = 1
+    NUM_AGENTS: int = 4
 
-    now = datetime.now()  # Get the current date and time
-    datetime_string = now.strftime("run_at_%Y%m%d_%H%M%S")  # Format as string
-    folder_name = f"sessions/{datetime_string}"
-    os.mkdir(folder_name)
+    RUN_TO_CONTINUE: str = ""
+
+    if not RUN_TO_CONTINUE:
+        now = datetime.now()  # Get the current date and time
+        datetime_string = now.strftime("run_at_%Y%m%d_%H%M%S")  # Format as string
+        folder_name = f"sessions/{datetime_string}"
+        print(f"Created run folder: {folder_name}")
+        os.mkdir(folder_name)
+    else:
+        folder_name = RUN_TO_CONTINUE
+
 
     # Init with a very low learning rate as we are tuning
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=2e-6)
