@@ -132,6 +132,5 @@ This project is licensed under the MIT License. See LICENSE for details.
 ## Use of LLMs
 
 I wrote the chess playing reinforcement learning part by hand: distributed MCTS, training, evaluation server etc.
-LLMs were used to create a lot of the testing and support scripts (PyGame interface, plotting etc.) and helped **a lot** to built the C++ chess simulator.
 
-::contentReference[oaicite:0]{index=0}
+LLMs were used to create a lot of the testing and support scripts (PyGame interface, plotting etc.) and helped **a lot** to built the C++ chess simulator.
