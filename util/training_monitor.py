@@ -1,14 +1,12 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import json
 import os
+import json
+from torch.utils.tensorboard import SummaryWriter
+
 
 class ChessEngineMonitor:
-    def __init__(self, save_dir=""):
-        plt.ion()  # Interactive mode on
-        self.fig, self.axs = plt.subplots(2, 3, figsize=(15, 10))  # 5 subplots in a 2x3 grid
-        self.axs = self.axs.flatten()
-        self.save_file = save_dir + "/chess_monitor_data.json"
+    def __init__(self, save_dir="runs/chess_engine"):
+        self.writer = SummaryWriter(log_dir=save_dir)
+        self.save_file = os.path.join(save_dir, "chess_monitor_data.json")
 
         # Data placeholders
         self.win_counts = {"White Wins": 0, "Black Wins": 0, "Draws": 0}
@@ -18,48 +16,9 @@ class ChessEngineMonitor:
         self.exploration_history = []
 
         if os.path.exists(self.save_file):
-            # If file exists then replace it
             self.load_progress()
 
-        # Initialize plots
-        self._initialize_plots()
-
-    def _initialize_plots(self):
-        plt.style.use("ggplot")
-
-        # Win distribution
-        self.axs[0].bar(self.win_counts.keys(), self.win_counts.values(), color=['white', 'black', 'gray'])
-        self.axs[0].set_title("Win Distribution")
-        self.axs[0].set_ylim(0, 1)
-
-        # Game lengths
-        self.axs[1].hist([], bins=20, alpha=0.75, color="blue")
-        self.axs[1].set_title("Game Length Distribution")
-        self.axs[1].set_xlabel("Moves per Game")
-        self.axs[1].set_ylabel("Frequency")
-
-        # Losses
-        self.axs[2].plot([], label="Total Loss", color="red")
-        self.axs[2].plot([], label="Value Loss", color="green")
-        self.axs[2].plot([], label="Policy Loss", color="blue")
-        self.axs[2].legend()
-        self.axs[2].set_title("Loss Over Time")
-        self.axs[2].set_xlabel("Training Iteration")
-        self.axs[2].set_ylabel("Loss")
-
-        # Elo Ratings
-        self.axs[3].plot([], label="Elo Rating", color="purple")
-        self.axs[3].set_title("Elo Rating Progression")
-        self.axs[3].set_xlabel("Training Iteration")
-        self.axs[3].set_ylabel("Elo Rating")
-
-        # Exploration factor
-        self.axs[4].plot([], label="Exploration Factor", color="orange")
-        self.axs[4].set_title("Exploration Parameter Over Time")
-        self.axs[4].set_xlabel("Training Iteration")
-        self.axs[4].set_ylabel("Exploration Value")
-
-        plt.tight_layout()
+        self.iteration = 0  # Tracks the iteration for x-axis in TensorBoard
 
     def update_wins(self, white_win):
         if white_win:
@@ -69,48 +28,32 @@ class ChessEngineMonitor:
         else:
             self.win_counts["Draws"] += 1
 
-        self.axs[0].cla()
-        self.axs[0].bar(self.win_counts.keys(), self.win_counts.values(), color=['blue', 'red', 'green'])
-        self.axs[0].set_title("Win Distribution")
-        self.axs[0].set_ylim(0, max(self.win_counts.values()) * 1.1)
+        total_games = sum(self.win_counts.values())
+        for key, value in self.win_counts.items():
+            self.writer.add_scalar(f"Wins/{key}", value, total_games)
 
-    def update_game_lengths(self, new_lengths):
-        self.game_lengths.append(new_lengths)
-        self.axs[1].cla()
-        self.axs[1].hist(self.game_lengths, bins=20, alpha=0.75, color="blue")
-        self.axs[1].set_title("Game Length Distribution")
-        self.axs[1].set_xlabel("Moves per Game")
-        self.axs[1].set_ylabel("Frequency")
+    def update_game_lengths(self, new_length):
+        self.game_lengths.append(new_length)
+        avg_length = sum(self.game_lengths) / len(self.game_lengths)
+        self.writer.add_scalar("Game Length/Average", avg_length, self.iteration)
+        self.writer.add_histogram("Game Length/Histogram", self.game_lengths, self.iteration)
 
     def update_losses(self, total_loss, value_loss, policy_loss):
         self.loss_history["Total Loss"].append(total_loss)
         self.loss_history["Value Loss"].append(value_loss)
         self.loss_history["Policy Loss"].append(policy_loss)
 
-        self.axs[2].cla()
-        self.axs[2].plot(self.loss_history["Total Loss"], label="Total Loss", color="red")
-        self.axs[2].plot(self.loss_history["Value Loss"], label="Value Loss", color="green")
-        self.axs[2].plot(self.loss_history["Policy Loss"], label="Policy Loss", color="blue")
-        self.axs[2].legend()
-        self.axs[2].set_title("Loss Over Time")
-        self.axs[2].set_xlabel("Training Iteration")
-        self.axs[2].set_ylabel("Loss")
+        self.writer.add_scalar("Loss/Total", total_loss, self.iteration)
+        self.writer.add_scalar("Loss/Value", value_loss, self.iteration)
+        self.writer.add_scalar("Loss/Policy", policy_loss, self.iteration)
 
     def update_experience(self, new_elo):
         self.experience_length.append(new_elo)
-        self.axs[3].cla()
-        self.axs[3].plot(self.experience_length, label="Elo Rating", color="purple")
-        self.axs[3].set_title("Experience Queue")
-        self.axs[3].set_xlabel("Training Iteration")
-        self.axs[3].set_ylabel("Experience Length")
+        self.writer.add_scalar("Elo/Rating", new_elo, self.iteration)
 
     def update_exploration(self, exploration_value):
         self.exploration_history.append(exploration_value)
-        self.axs[4].cla()
-        self.axs[4].plot(self.exploration_history, label="Exploration Factor", color="orange")
-        self.axs[4].set_title("Exploration Parameter Over Time")
-        self.axs[4].set_xlabel("Training Iteration")
-        self.axs[4].set_ylabel("Exploration Value")
+        self.writer.add_scalar("Exploration/Factor", exploration_value, self.iteration)
 
     def save_progress(self):
         data = {
@@ -120,9 +63,9 @@ class ChessEngineMonitor:
             "experience_length": self.experience_length,
             "exploration_history": self.exploration_history
         }
+        os.makedirs(os.path.dirname(self.save_file), exist_ok=True)
         with open(self.save_file, "w") as f:
             json.dump(data, f, indent=4)
-        print("Progress saved.")
 
     def load_progress(self):
         try:
@@ -137,5 +80,5 @@ class ChessEngineMonitor:
         except FileNotFoundError:
             print("No saved progress found.")
 
-    def refresh(self):
-        plt.pause(0.1)
+    def step(self):
+        self.iteration += 1
