@@ -107,7 +107,7 @@ This was a very engaging challenge to implement on extremely limited hardware…
 
 4. Run Training
     ```
-    python train.py --config configs/selfplay.yaml
+    python paralel_train.py
 
 Play vs. Engine
 
