@@ -12,7 +12,7 @@
 with Monte-Carlo Tree Search (MCTS). Inspired by Google DeepMind’s AlphaZero, it learns to play through:
 
 1. **Behavioral Cloning** on mixed quality games (imitation learning)
-2. **Self-Play Reinforcement Learning** with curriculum learning  
+2. **Fine-tuned through Self-Play Reinforcement Learning** with curriculum learning  
 
 All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrating how to extract strong performance under compute constraints.
 
