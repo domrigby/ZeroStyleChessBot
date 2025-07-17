@@ -16,7 +16,7 @@
 
 All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrating how to extract strong performance under compute constraints.
 
-> This was a very engaging challenge to implement on extremely limited hardware… I added biases, curriculum learning, and distillation tricks to guide training.
+This was a very engaging challenge to implement on extremely limited hardware… I added biases, curriculum learning, and distillation tricks to guide training.
 
 ---
 
@@ -36,7 +36,7 @@ All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrat
   - Python bindings for seamless training scripts  
   - Parallel data collection & batched GPU inference  
 
-- **Model Distillation**  
+- **COMING SOON: Model Distillation**  
   - Compress high-capacity models into a lightweight network  
   - Enables real-time play on an RTX 1050  
 
@@ -72,7 +72,7 @@ All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrat
    - **Curation:** remove timeouts/resignations, ensure IID moves  
    - **Training:** predict next move and game outcome (policy & value head)  
 
-2. **Model Distillation**  
+2. **COMING SOON: Model Distillation**  
    - Train a smaller network to mimic a high-capacity “teacher”  
    - Enables fast inference on low-power GPUs  
 
@@ -107,7 +107,7 @@ All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrat
 
 4. Run Training
     ```
-    python train.py --config configs/selfplay.yaml
+    python paralel_train.py
 
 Play vs. Engine
 
@@ -129,4 +129,8 @@ Play vs. Engine
 
 This project is licensed under the MIT License. See LICENSE for details.
 
-::contentReference[oaicite:0]{index=0}
+## Use of LLMs
+
+I wrote the chess playing reinforcement learning part by hand: distributed MCTS, training, evaluation server etc.
+
+LLMs were used to create a lot of the testing and support scripts (PyGame interface, plotting etc.) and helped **a lot** to built the C++ chess simulator.

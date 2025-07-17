@@ -79,12 +79,12 @@ class TrainingProcess(Process):
                         self.memory.save_game_to_memory(game_states, agent_id)
                         self.games_played += 1
                         print(f"Games played: {self.games_played}")
+                        
+                        if self.games_played >= self.min_games_to_train:
+                            with torch.cuda.stream(stream):
+                                self.train_neural_network()
                     except Empty:
                         break
-
-            if self.games_played >= self.min_games_to_train:
-                with torch.cuda.stream(stream):
-                    self.train_neural_network()
 
             time_now = time.time()
 
