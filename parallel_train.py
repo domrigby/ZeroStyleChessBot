@@ -6,13 +6,33 @@ from queue import Empty
 from datetime import datetime
 import os
 import time
-
-class ParallelMonitor:
-
-    def __init__(self):
-        pass
+import wandb
+import torch
+import numpy as np
+import random
+import argparse
 
 if __name__ == "__main__":
+
+    # Set weights and biases to offline
+    wandb.init(mode="offline")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int,default=42, help="Random seed")
+    parser.add_argument("--init_lr", type=float, default=2e-6, help="Initial learning rate")
+    parser.add_argument("--num_agents", type=int, default=4, help="Number of self-play agents")
+    parser.add_argument("--num_trainers", type=int, default=1, help="Number of trainers")
+    parser.add_argument("--num_evaluators", type=int, default=1, help="Number of evaluators")
+    parser.add_argument("--run_to_continue", type=str, default=None, help="Override default run name")
+    parser.add_argument("--num_cnn_repeats", type=int, default=32, help="Number of repeated ResNet blocks in policy-value function")
+    args = parser.parse_args()
+
+    # Set random seedd
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
     try:
        mp.set_start_method('spawn', force=True)
        print("Multi-processing spawned.")
@@ -20,11 +40,10 @@ if __name__ == "__main__":
         print("Failed to spawn")
         pass
 
-    NUM_EVALUATORS: int = 1
-    NUM_TRAINERS: int = 1
-    NUM_AGENTS: int = 4
-
-    RUN_TO_CONTINUE: str = ""
+    NUM_EVALUATORS: int = args.num_evaluators
+    NUM_TRAINERS: int = args.num_trainers
+    NUM_AGENTS: int = args.num_agents
+    RUN_TO_CONTINUE: str = args.run_to_continue
 
     if not RUN_TO_CONTINUE:
         now = datetime.now()  # Get the current date and time
@@ -35,15 +54,19 @@ if __name__ == "__main__":
     else:
         folder_name = RUN_TO_CONTINUE
 
-
     # Init with a very low learning rate as we are tuning
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=2e-6)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=args.num_cnn_repeats, init_lr=args.init_lr)
     chess_net.load_network("neural_nets/example_network.pt")
     chess_net.share_memory()
 
     agents, evaluators, trainers, data_queues_dicts = create_agents(folder_name, NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS, chess_net,
                                                                     expert_data_path="/home/dom/1TB_drive/chess_data")
 
+    # Save useful daa with weights and biases
+    wandb.init(project="ZeroStyleChessBot", name=folder_name, config=vars(args), save_code=True, dir=folder_name)
+    cfg = wandb.config  # easy alias
+
+    # Start all the parallel bits up and running
     [trainer.start() for trainer in trainers]
     [eval.start() for eval in evaluators]
     [agent.start() for agent in agents]
