@@ -61,10 +61,20 @@ class TrainingProcess(Process):
         self.games_played = 0
 
     def set_experience_queue(self, experience_queue: Queue):
+        """
+        Func to set the experience queue
+        :param experience_queue:
+        :return:
+        """
         self.experience_queue = experience_queue
 
     @error_logger
     def run(self):
+        """
+        Main running loop for the trainer. It waits for incoming data and then begins to train the network once there is
+        sufficient data.
+        :return:
+        """
 
         # Create cuda stream
         stream = torch.cuda.Stream()
