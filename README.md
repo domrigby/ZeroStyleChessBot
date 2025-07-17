@@ -16,7 +16,7 @@
 
 All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrating how to extract strong performance under compute constraints.
 
-> This was a very engaging challenge to implement on extremely limited hardware… I added biases, curriculum learning, and distillation tricks to guide training.
+This was a very engaging challenge to implement on extremely limited hardware… I added biases, curriculum learning, and distillation tricks to guide training.
 
 ---
 
@@ -36,7 +36,7 @@ All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrat
   - Python bindings for seamless training scripts  
   - Parallel data collection & batched GPU inference  
 
-- **Model Distillation**  
+- **COMING SOON: Model Distillation**  
   - Compress high-capacity models into a lightweight network  
   - Enables real-time play on an RTX 1050  
 
@@ -72,7 +72,7 @@ All training was done on consumer-grade hardware (RTX 1050/RTX 3090), demonstrat
    - **Curation:** remove timeouts/resignations, ensure IID moves  
    - **Training:** predict next move and game outcome (policy & value head)  
 
-2. **Model Distillation**  
+2. **COMING SOON: Model Distillation**  
    - Train a smaller network to mimic a high-capacity “teacher”  
    - Enables fast inference on low-power GPUs  
 
