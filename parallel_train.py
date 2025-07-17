@@ -45,7 +45,6 @@ if __name__ == "__main__":
     print("Agent training has commenced.")
 
     monitor = ChessEngineMonitor(folder_name)
-    monitor.refresh()
 
     start_time = time.time()
 
@@ -59,7 +58,6 @@ if __name__ == "__main__":
                 monitor.update_game_lengths(new_data_point['game_length'])
             except Empty:
                 continue
-            monitor.refresh()
 
         for queue in data_queues_dicts['training']:
 
@@ -76,8 +74,6 @@ if __name__ == "__main__":
 
             except Empty:
                 continue
-
-            monitor.refresh()
 
             time_now = time.time()
 
