@@ -121,7 +121,7 @@ Play vs. Engine
 
 * Full league training with Nash averaging
 
-* Enhanced curriculum using endgame tablebases
+* Focus on [high entropy moves during training](https://arxiv.org/abs/2506.01939)
 
 * Distributed training on multi-GPU clusters
 
