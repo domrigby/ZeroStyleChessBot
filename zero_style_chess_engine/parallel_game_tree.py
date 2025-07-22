@@ -306,7 +306,8 @@ class GameTree(Process):
 
                 # Set virtual loss to discourage search down here for a bit
                 if self.multiprocess and not self.full_rollout_virtual_loss:
-                    current_node.virtual_losses[move_idx] -= 1.
+                    last_move_idx: int = visited_moves[-1][1]
+                    current_node.virtual_losses[last_move_idx] -= 1.
                     #  If are currently exploring all the children then discourage next rollout from following us
                     #  NOTE: this indicates your evaluation is far too slow
                     if current_node.parent_node is not None and np.all(current_node.virtual_losses < 0):
@@ -354,7 +355,6 @@ class GameTree(Process):
                 if current_node.branch_complete and current_node.game_over_type is not GameOverType.NO_TAKES_DRAW:
                     end_nodes.append(current_node)
 
-
                 # Below is purely for inference mode when the user is playing it
                 if self.inference_mode:
                     try:
@@ -365,7 +365,7 @@ class GameTree(Process):
                             print("MOVE RECEIVED")
                             move_idx = self.root.moves.index(result['move_to_push'])
                             if move_idx not in self.root.child_nodes.keys():
-                                # This occassionally happens when engine takes too long to intialise and then user plays move very quickly
+                                # This occassionally happens when engine takes too long to initialise and then user plays move very quickly
                                 new_state: str = self.environment.push(self.root.state, self.root.moves[move_idx])
                                 self.root.child_nodes[move_idx] = Node(new_state, move_idx=move_idx, board=self.environment,
                                                                         parent_node=self.root)
@@ -383,6 +383,9 @@ class GameTree(Process):
         # Wait until the end of the rollout and then save any games which finished.
         if self.training:
             for node in end_nodes:
+                # These are states which we didn't visit with the root node but were end games.
+                # In order to maintain high quality data we only save the move whilst the game was being played optimally
+                # I.e. if it was only found due to randomness then we don't count it as it a move a real player would never make
                 self.save_path_whilst_optimal(node)
 
     @staticmethod
@@ -422,14 +425,10 @@ class GameTree(Process):
                 # Set all to zero if not using full rollouts
                 node.virtual_losses[move_idx] = 0
 
-    def search_for_sufficiently_visited_nodes(self, root_node):
-        self.recursive_search(root_node, 0, root_node)
-
-
     def save_path_whilst_optimal(self, start_node: Node):
+
         """ Find games in which both players have played optimally at least for two moves"""
         game_states: List[dict] = []
-
 
         # Get game winner
         if start_node.game_won:
