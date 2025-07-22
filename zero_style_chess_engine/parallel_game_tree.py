@@ -299,7 +299,6 @@ class GameTree(Process):
 
                 if move_idx is None:
                     # Edge case in which
-                    warnings.warn("Breaking tree search due to move_idx being None")
                     break
 
             # Completed rollout processing
