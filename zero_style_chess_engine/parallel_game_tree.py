@@ -4,7 +4,7 @@ from numpy.random import default_rng
 import time
 from multiprocessing import Queue, Process
 from queue import Empty
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from neural_nets.data.fen_chess_puzzles.curiculum_maker import LichessCuriculum
 from zero_style_chess_engine.memory import Memory, Turn
@@ -172,7 +172,7 @@ class Node:
 class GameTree(Process):
 
     save_non_root_states = False
-    save_images_of_checkmates = True
+    save_images_of_checkmates = False
     full_rollout_virtual_loss = False
     curiculum = True
     maximum_lag = 8
@@ -250,30 +250,30 @@ class GameTree(Process):
 
         end_nodes: List[Node] = []
 
+        #  Initialise environment if not yet done so
         if self.environment is None:
             self.environment = chess_moves.ChessEngine()
 
+        # Set the root node to the opening state
         if current_node is None:
             current_node: Node = self.root
 
+        # Perform N rollouts
         for idx in range(number_of_expansions):
 
             if self.verbose:
                 print(f"\rMove = {idx}", end="")
 
             # Thread num is used a draw breaker for early iterations such that they don't search down the same branch
-            visited_moves: List[List[Node, int]] = []
-            move_has_child_node = True
-
-            # Apply last round in case they have returned
-            self.apply_neural_net_results()
+            visited_moves: List[Tuple[Node, int]] = []
+            move_has_child_node: bool = True
 
             # Explore to leaf
             while move_has_child_node and not current_node.branch_complete:
 
-                # Select
+                # Select a move
                 move_idx = current_node.puct()
-                visited_moves.append([current_node, move_idx])
+                visited_moves.append((current_node, move_idx))
 
                 # Statistics
                 current_node.Ns[move_idx] += 1
@@ -285,30 +285,31 @@ class GameTree(Process):
                 if move_idx in current_node.child_nodes:
                     # Get new node and then a new move
                     current_node = current_node.child_nodes[move_idx]
-
                 else:
                     # We have found a leaf move
                     move_has_child_node = False
 
-                # Record some time waiting data
-                pre_check_time = time.perf_counter_ns()
-                self.time_waiting += (time.perf_counter_ns() - pre_check_time) / 1e9
-
                 if not self.multiprocess and self.training and idx % 30 == 0:
+                    #  If single core and training... train
                     self.train_neural_network_local()
 
                 if self.multiprocess:
+                    #  If multiprocessing... collect data from inference server
                     self.apply_neural_net_results()
 
                 if move_idx is None:
+                    # Edge case in which
+                    warnings.warn("Breaking tree search due to move_idx being None")
                     break
-                
-            if not current_node.branch_complete and move_idx is not None and visited_moves:
+
+            # Completed rollout processing
+            if not current_node.branch_complete and visited_moves:
 
                 # Set virtual loss to discourage search down here for a bit
                 if self.multiprocess and not self.full_rollout_virtual_loss:
                     current_node.virtual_losses[move_idx] -= 1.
-                    #  If are currently exploring all down here then get
+                    #  If are currently exploring all the children then discourage next rollout from following us
+                    #  NOTE: this indicates your evaluation is far too slow
                     if current_node.parent_node is not None and np.all(current_node.virtual_losses < 0):
                         current_node.parent_node.virtual_losses[current_node.move_idx] = -1
 
@@ -316,6 +317,7 @@ class GameTree(Process):
                 current_node, reward, done = current_node.expand(move_idx, self.environment, state=current_node.state)
 
                 if not self.multiprocess:
+                    #  Calculate node value and then propagate signal back up
                     value = self.neural_net.node_evaluation(current_node)
                     current_node.V = value
                     reward += value
@@ -325,19 +327,18 @@ class GameTree(Process):
                 else:
 
                     if reward != 0:
-                        # Send reward signal up the tree
+                        # If this move had reward... we don't need to wait until the value network returns value to send
+                        # the result back up the tree
                         self.backpropagation(visited_moves, reward, undo_v_loss=False)
 
                     # Create a hash of the node such that we can relocate this node later
                     node_hash = hash(current_node)
-
                     if node_hash not in self.process_queue_node_lookup:
 
                         states = current_node.state
                         legal_moves = current_node.legal_move_strings
 
                         self.process_queue_node_lookup[node_hash] = (current_node, visited_moves, reward)
-
                         self.process_queue.put((self.agent_id, node_hash, states, legal_moves))
 
                         # Increment the number of nodes sent for processing
@@ -350,9 +351,12 @@ class GameTree(Process):
                         # TODO: handle these better
                         self.undo_informationless_rollout(visited_moves)
 
+                # If we reach a terminal node not in the main search we still save the game to increase data.
                 if current_node.branch_complete and current_node.game_over_type is not GameOverType.NO_TAKES_DRAW:
                     end_nodes.append(current_node)
 
+
+                # Below is purely for inference mode when the user is playing it
                 if self.inference_mode:
                     try:
                         result = self.send_results_queue.get_nowait()
@@ -361,7 +365,6 @@ class GameTree(Process):
                         if result['move_to_push']:
                             print("MOVE RECEIVED")
                             move_idx = self.root.moves.index(result['move_to_push'])
-
                             if move_idx not in self.root.child_nodes.keys():
                                 # This occassionally happens when engine takes too long to intialise and then user plays move very quickly
                                 new_state: str = self.environment.push(self.root.state, self.root.moves[move_idx])

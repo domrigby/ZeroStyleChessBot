@@ -89,29 +89,36 @@ class GenericNet(nn.Module):
         self.load_state_dict(torch.load(filename))
 
     def create_legal_move_mask(self, moves, team: str = None):
+
+        # Initiliase mvoe to indices look up
         move_to_indices_lookup = []
 
         # Collect indices for batch updates
         all_indices = []
 
-        for legal_move in moves:
-            # Ignore pawn promotions for now
-            if len(str(legal_move)) < 5:
-                if team == "black":
-                    legal_move_str = chess_engine.unflip_move(str(legal_move))
-                    indices = chess_engine.move_to_target_indices(legal_move_str)
-                else:
-                    indices = chess_engine.move_to_target_indices(str(legal_move))
-
-                all_indices.append(indices)
-                move_to_indices_lookup.append([legal_move, indices])
-
         # Create mask efficiently with batched updates
         legal_move_mask = torch.zeros(self.output_size, dtype=torch.float32)
-        if all_indices:  # only if we have legal moves
-            idx_tensor = torch.tensor(all_indices, dtype=torch.long)  # (N,3)
-            c, r, k = idx_tensor[:, 0], idx_tensor[:, 1], idx_tensor[:, 2]
-            legal_move_mask[c, r, k] = 1.0  # set exactly those cells to 1
+
+        if len(moves) > 1:
+            for legal_move in moves:
+                # Ignore pawn promotions for now
+                if len(str(legal_move)) < 5:
+                    if team == "black":
+                        legal_move_str = chess_engine.unflip_move(str(legal_move))
+                        indices = chess_engine.move_to_target_indices(legal_move_str)
+                    else:
+                        indices = chess_engine.move_to_target_indices(str(legal_move))
+
+
+                    all_indices.append(indices)
+                    move_to_indices_lookup.append([legal_move, indices])
+
+            if all_indices:  # only if we have legal moves
+                idx_tensor = torch.tensor(all_indices, dtype=torch.long)  # (N,3)
+                c, r, k = idx_tensor[:, 0], idx_tensor[:, 1], idx_tensor[:, 2]
+                legal_move_mask[c, r, k] = 1.0  # set exactly those cells to 1
+        else:
+            legal_move_mask = legal_move_mask + 1.
 
         return legal_move_mask, move_to_indices_lookup
 
@@ -190,7 +197,10 @@ class GenericNet(nn.Module):
         for idx, (move_set, prob_set) in enumerate(zip(moves, probabilities)):
             for move, prob in zip(move_set, prob_set):
                 all_indices[index] = chess_engine.move_to_target_indices(str(move))  # Vectorized storage
-                all_probs[index] = prob
+                try:
+                    all_probs[index] = prob
+                except:
+                    print(move, prob, move_set, prob_set)
                 batch_indices[index] = idx
                 index += 1  # Move to next position
 

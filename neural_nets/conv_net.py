@@ -95,13 +95,6 @@ class ChessNet(GenericNet):
 
         total_loss = self.val_beta * value_loss + self.pol_alpha * policy_loss
 
-        # Step the weights
-        if training:
-            self.optimiser.zero_grad()
-            total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-            self.optimiser.step()
-
         return total_loss, value_loss, policy_loss
 
 

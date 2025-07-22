@@ -50,9 +50,9 @@ class ChessEngineMonitor:
         self.writer.add_scalar("Loss/Value", value_loss, self.iteration)
         self.writer.add_scalar("Loss/Policy", policy_loss, self.iteration)
 
-    def update_experience(self, new_elo):
-        self.experience_length.append(new_elo)
-        self.writer.add_scalar("Elo/Rating", new_elo, self.iteration)
+    def update_experience(self, experience_length: int):
+        self.experience_length.append(experience_length)
+        self.writer.add_scalar("Experience Length", experience_length, self.iteration)
 
     def update_exploration(self, exploration_value):
         self.exploration_history.append(exploration_value)

@@ -13,12 +13,12 @@ class Turn(Enum):
 class DataPoint:
     def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.,
                  parent_datapoint = None):
-        self.state = state
-        self.moves = moves
-        self.probs = probs
-        self.win_val = win_val
-        self.player = state.split()[1]
-        self.parent_datapont = parent_datapoint
+        self.state: str = state
+        self.moves: List[str] = moves
+        self.probs: List[float] = probs
+        self.win_val: float = win_val
+        self.player: str = state.split()[1]
+        self.parent_datapont: DataPoint = parent_datapoint
 
 
 class Memory:
@@ -31,9 +31,11 @@ class Memory:
         # So we can go back and update them with who won
         self.turn_list: List[DataPoint] = []
 
-        self.index = 0
-        self.games_played = 0
-        self.max_len = length_buffer
+        # Store counters
+        self.index: int = 0
+        self.games_played: int = 0
+
+        self.max_len: int = length_buffer
 
         self.last_moves: Dict[int, Optional[DataPoint]] = {}
         for agent_num in range(num_agents):
@@ -44,9 +46,8 @@ class Memory:
         if expert_data_path is not None:
             self.load_expert_data(expert_data_path)
 
-        #  Load data from previous games
+        #  Load data from previous games and get the length of the currne data
         self.load_directory()
-        #  Get the length of the current data
         self.last_index_saved = len(self.data)
 
     def __len__(self):
@@ -60,10 +61,11 @@ class Memory:
         :return:
         """
 
-        parent_move = None
+        parent_move: DataPoint = None
 
         for idx, game_state in enumerate(game):
 
+            # Extract the states
             state = game_state['state']
             observed_moves = game_state['moves']
             visits = game_state['visit_counts']
@@ -77,21 +79,35 @@ class Memory:
                 moves.append(move)
                 probs.append(count/total)
 
-            data_point = DataPoint(state, moves, probs, value, parent_move)
+            data_point: DataPoint = DataPoint(state, moves, probs, value, parent_move)
             self.data.append(data_point)
-            parent_move = data_point
+            parent_move: DataPoint = data_point
 
     def get_batch(self, batch_size: int = 32, expert_ratio: float = 1.):
+        """
+        Mixes real and generate data to prevent overfitting to the new data
+        """
 
         # Set batch size for real and expert data
-        real_batch = round(batch_size * expert_ratio)
-        expert_batch = batch_size - real_batch
+        expert_batch = round(batch_size * expert_ratio)
+        real_batch = batch_size - expert_batch
 
         # Retrieve the batch
-        batch = []
-        batch.extend(self.get_real_data_batch(batch_size=real_batch))
-        batch.extend(self.get_expert_batch(batch_size=expert_batch))
-        return batch
+        if real_batch > 0:
+            states, moves, probs, wins = self.get_real_data_batch(batch_size=real_batch)
+        else:
+            states, moves, probs, wins = [], [], [], []
+
+        # Extend the current batch with some new data
+        if expert_batch > 0:
+            new_batch = self.get_expert_batch(batch_size=expert_batch)
+
+            states.extend(new_batch[0])
+            moves.extend(new_batch[1])
+            probs.extend(new_batch[2])
+            wins.extend(new_batch[3])
+
+        return states, moves, probs, wins
 
 
     def get_real_data_batch(self, batch_size: int = 32):
@@ -146,7 +162,7 @@ class Memory:
 
     def load_expert_data(self, path: str, file_format: str = "pkl", max_len: int = 250000):
         """
-        Collect a certain amount of expert data from the expert data directory. Data should be in the form given by networks/data
+        Collect a certain amount of expert data from the expert data directory. Data should be in the form given by neural_nets/data
         :param path: path to directory
         :param file_format: format the data is in
         :param max_len: maximum number to retrieve
@@ -173,8 +189,8 @@ class Memory:
         batch_data = [self.expert_data[idx] for idx in idxs]
 
         states = [turn['fen'] for turn in batch_data]
-        moves = [turn['moves'] for turn in batch_data]
-        probs = moves
+        moves = [[turn['moves']] for turn in batch_data]
+        probs = [[1.] for turn in batch_data] # Expert data only has one move
         wins = [turn['value'] for turn in batch_data]
 
         return states, moves, probs, wins
