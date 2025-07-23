@@ -20,6 +20,11 @@ class DataPoint:
         self.player: str = state.split()[1]
         self.parent_datapont: DataPoint = parent_datapoint
 
+        # probs = np.array(probs)
+        # entropy = -np.sum(probs * np.log(probs, where=(probs > 0), out=np.zeros_like(probs)))
+        # print(f"Entropy = {entropy}")
+        # print(probs)
+
 
 class Memory:
 
@@ -61,7 +66,10 @@ class Memory:
         :return:
         """
 
-        parent_move: DataPoint = None
+        parent_move: Optional[DataPoint] = None
+        game_moves: List[DataPoint] = []
+
+        entropy_of_batch: np.array = np.zeros(len(game))
 
         for idx, game_state in enumerate(game):
 
@@ -79,9 +87,23 @@ class Memory:
                 moves.append(move)
                 probs.append(count/total)
 
+            np_probs = np.array(probs)
+            entropy = -np.sum(np_probs * np.log(np_probs, where=(np_probs > 0), out=np.zeros_like(np_probs)))
+            entropy_of_batch[idx] = entropy
+
+            # Append the move to the set
             data_point: DataPoint = DataPoint(state, moves, probs, value, parent_move)
-            self.data.append(data_point)
+            game_moves.append(data_point)
             parent_move: DataPoint = data_point
+
+        # In order to maintain semi-IID data and prevent overfitting, I take two moves from each game from the training.
+        # These are chosen due according to which ever have the highest entropy (lowest certain of move)
+        # Reason for max adding... so that max entropy is only maximum 10 times more likely than the lowest possible moves
+        print(f"Entropy = {entropy_of_batch}")
+        entropy_of_batch += 0.1 * entropy_of_batch.max()
+        self.data.extend(np.random.choice(game_moves, size=min(2, len(game_moves)),
+                                          p=entropy_of_batch/entropy_of_batch.sum(),
+                                          replace=False))
 
     def get_batch(self, batch_size: int = 32, expert_ratio: float = 1.):
         """

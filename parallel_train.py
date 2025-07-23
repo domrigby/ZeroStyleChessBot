@@ -72,6 +72,7 @@ if __name__ == "__main__":
     [agent.start() for agent in agents]
     print("Agent training has commenced.")
 
+    # Create the tensorboard monitor
     monitor = ChessEngineMonitor(folder_name)
 
     start_time = time.time()

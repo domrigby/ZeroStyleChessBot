@@ -117,10 +117,6 @@ Play vs. Engine
 
 * ELO Improvement: approximately 1500 ELO.
 
-# Interesting Observation
-
-The engine 
-
 🔮 Future Work
 
 * Full league training with Nash averaging
