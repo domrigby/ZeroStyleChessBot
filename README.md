@@ -18,6 +18,8 @@ All training was done on consumer-grade hardware (RTX 1050 for development/RTX 3
 
 This was a very engaging challenge to implement on extremely limited hardware.
 
+> Note: this was a fun, tinkering project and the software is not always commented or written as well as I'd like! I aim to clear this up when I have time
+
 ---
 
 ## 📚 Key Features
