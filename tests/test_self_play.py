@@ -1,3 +1,4 @@
+import multiprocessing
 import multiprocessing.queues
 import queue
 from pathlib import Path
@@ -7,14 +8,20 @@ import chess_moves
 import pytest
 
 from zero_style_chess_engine.messages import PositionRecord
-from zero_style_chess_engine.parallel_game_tree import GameTree, Node
+from zero_style_chess_engine.mcts import Node
+from zero_style_chess_engine.self_play import SelfPlayWorker
 
 
 @pytest.fixture
-def game_tree(tmp_path: Path) -> GameTree:
+def worker(tmp_path: Path) -> SelfPlayWorker:
     # A thread queue stands in for the multiprocessing queue: same put/get interface, no feeder thread delay
     game_record_queue: "queue.Queue[Any]" = queue.Queue()
-    return GameTree(save_dir=str(tmp_path), game_record_queue=cast(multiprocessing.queues.Queue, game_record_queue))
+    return SelfPlayWorker(
+        save_dir=str(tmp_path),
+        agent_id=0,
+        stop_event=multiprocessing.Event(),
+        game_record_queue=cast(multiprocessing.queues.Queue, game_record_queue),
+    )
 
 
 def _optimal_line(root: Node, depth: int) -> Node:
@@ -34,19 +41,19 @@ def _optimal_line(root: Node, depth: int) -> Node:
         pytest.param(1, 0, id="single_position_drops_to_nothing"),
     ],
 )
-def test_save_path_whilst_optimal_keeps_an_even_number_of_positions(
-    game_tree: GameTree, positions_on_path: int, expected_saved: int
+def test_optimal_path_record_keeps_an_even_number_of_positions(
+    worker: SelfPlayWorker, positions_on_path: int, expected_saved: int
 ) -> None:
     # Saved positions are the nodes strictly between the root and the end node
-    end_node = _optimal_line(game_tree.root, depth=positions_on_path + 1)
+    end_node = _optimal_line(worker.mcts.root, depth=positions_on_path + 1)
 
-    game_tree.save_path_whilst_optimal(end_node)
-    assert game_tree.game_record_queue is not None
+    worker._record_from(end_node, stop_when_suboptimal=True)
+    assert worker.game_record_queue is not None
 
     if expected_saved == 0:
-        assert game_tree.game_record_queue.empty()
+        assert worker.game_record_queue.empty()
     else:
-        game_states = game_tree.game_record_queue.get_nowait().positions
+        game_states = worker.game_record_queue.get_nowait().positions
         assert len(game_states) == expected_saved
 
 
@@ -58,54 +65,56 @@ LOSS_VALUE = -1
 DRAW_VALUE = 0
 
 
-def _play_scripted_game(game_tree: GameTree, moves: List[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run GameTree.train with the search replaced by one that puts every visit on the next scripted move.
+def _play_scripted_game(worker: SelfPlayWorker, moves: List[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run SelfPlayWorker.train with the search replaced by one that puts every visit on the next scripted move.
 
     The first search of the following game sets the stop event, so train() returns after one complete game.
     """
     engine = chess_moves.ChessEngine()
     remaining_moves = iter(moves)
 
-    def scripted_search(current_node: Node, number_of_expansions: int) -> None:
+    def scripted_search(number_of_expansions: int) -> List[Node]:
+        current_node = worker.mcts.root
         move = next(remaining_moves, None)
         if move is None:
-            game_tree.stop_event.set()
+            worker.stop_event.set()
             move = current_node.moves[0]
         move_idx = current_node.moves.index(move)
         current_node.expand(move_idx, engine, state=current_node.state)
         current_node.Ns[move_idx] = 1
+        return []
 
-    monkeypatch.setattr(game_tree, "parallel_search", scripted_search)
-    game_tree.train()
+    monkeypatch.setattr(worker.mcts, "search", scripted_search)
+    worker.train()
 
 
-def _saved_games(game_tree: GameTree) -> List[List[PositionRecord]]:
-    assert game_tree.game_record_queue is not None
+def _saved_games(worker: SelfPlayWorker) -> List[List[PositionRecord]]:
+    assert worker.game_record_queue is not None
     games = []
-    while not game_tree.game_record_queue.empty():
-        game_states = game_tree.game_record_queue.get_nowait().positions
+    while not worker.game_record_queue.empty():
+        game_states = worker.game_record_queue.get_nowait().positions
         games.append(game_states)
     return games
 
 
 def test_played_checkmate_game_is_saved_with_outcome_values(
-    game_tree: GameTree, monkeypatch: pytest.MonkeyPatch
+    worker: SelfPlayWorker, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Regression (D3): a game that ended in mate on the board was never sent to the trainer."""
-    _play_scripted_game(game_tree, FOOLS_MATE_MOVES, monkeypatch)
+    _play_scripted_game(worker, FOOLS_MATE_MOVES, monkeypatch)
 
-    games = _saved_games(game_tree)
+    games = _saved_games(worker)
     assert len(games) == 1
     # Every position before the mate, starting position included; black delivered mate
     saved_positions = [(state.fen.split()[1], state.value) for state in games[0]]
     assert sorted(saved_positions) == sorted([("w", LOSS_VALUE), ("b", WIN_VALUE), ("w", LOSS_VALUE), ("b", WIN_VALUE)])
-    assert game_tree.start_state in [state.fen for state in games[0]]
+    assert worker.start_state in [state.fen for state in games[0]]
 
 
-def test_played_stalemate_game_is_saved_as_a_draw(game_tree: GameTree, monkeypatch: pytest.MonkeyPatch) -> None:
-    game_tree.start_state = STALEMATE_START
-    _play_scripted_game(game_tree, STALEMATE_MOVES, monkeypatch)
+def test_played_stalemate_game_is_saved_as_a_draw(worker: SelfPlayWorker, monkeypatch: pytest.MonkeyPatch) -> None:
+    worker.start_state = STALEMATE_START
+    _play_scripted_game(worker, STALEMATE_MOVES, monkeypatch)
 
-    games = _saved_games(game_tree)
+    games = _saved_games(worker)
     assert len(games) == 1
     assert [(state.fen, state.value) for state in games[0]] == [(STALEMATE_START, DRAW_VALUE)]

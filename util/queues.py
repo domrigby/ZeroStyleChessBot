@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Tuple
 from neural_nets.conv_net import ChessNet
 from neural_nets.data.fen_chess_puzzles.curriculum import load_curricula
 from util.config import TrainingConfig
-from zero_style_chess_engine.parallel_game_tree import GameTree
+from zero_style_chess_engine.self_play import SelfPlayWorker
 from zero_style_chess_engine.evaluator import Evaluator
 from zero_style_chess_engine.trainer import Trainer
 
@@ -16,13 +16,9 @@ def create_agents(
     num_evaluators: int,
     num_trainers: int,
     network: ChessNet,
-    training: bool = True,
     start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-    verbose: bool = False,
-    inference_mode_queue: Optional[Queue] = None,
-    send_results_queue: Optional[List[Queue]] = None,
     config: Optional[TrainingConfig] = None,
-) -> Tuple[List[GameTree], List[Evaluator], List[Trainer], Dict[str, List[Queue]], synchronize.Event]:
+) -> Tuple[List[SelfPlayWorker], List[Evaluator], List[Trainer], Dict[str, List[Queue]], synchronize.Event]:
     """
     This function initialises all the agents and strings and distributes the queues accordingly
     TOOD: get rid of this
@@ -45,7 +41,7 @@ def create_agents(
         agents_per_trainer = num_agents / num_trainers
 
     # Start initializing stuff
-    agents: List[GameTree] = []
+    agents: List[SelfPlayWorker] = []
     eval_result_queues: Dict[int, Queue] = {}
     eval_request_queues: List[List[Queue]] = [[] for _ in range(num_evaluators)]
     game_record_queues: List[List[Queue]] = [[] for _ in range(num_trainers)]
@@ -57,7 +53,7 @@ def create_agents(
     weights_queues: List[Queue] = [multiprocessing.Queue(maxsize=1) for _ in range(num_evaluators)]
 
     # Read the puzzle CSV once here; each agent gets only its own sample of positions
-    curricula = load_curricula(config.curriculum_csv_path if training else None, num_agents)
+    curricula = load_curricula(config.curriculum_csv_path, num_agents)
 
     for idx in range(num_agents):
         eval_request_queue: Queue = Queue()
@@ -76,27 +72,14 @@ def create_agents(
         else:
             game_record_queue = None
 
-        send_queue: Optional[Queue]
-        if inference_mode_queue and send_results_queue:
-            inference_mode = True
-            send_queue = send_results_queue[idx]
-        else:
-            inference_mode = False
-            send_queue = None
-
-        agent = GameTree(
+        agent = SelfPlayWorker(
             save_dir=save_dir,
             agent_id=idx,
-            training=training,
             eval_request_queue=eval_request_queue,
             game_record_queue=game_record_queue,
             eval_result_queue=eval_result_queue,
             stats_queue=agent_stats_queue,
             start_state=start_state,
-            verbose=verbose,
-            inference_mode=inference_mode,
-            infering_mode_queue=inference_mode_queue,
-            send_results_queue=send_queue,
             stop_event=stop_event,
             sims=config.sims,
             maximum_lag=config.maximum_lag,
