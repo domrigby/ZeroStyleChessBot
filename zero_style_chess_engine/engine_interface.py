@@ -28,7 +28,7 @@ class EngineInterface:
             self.send_results_queues: list[Queue] = [Queue() for _ in range(self.num_processes)]
 
             # Create the tree and evaluator – note that create_agents returns lists.
-            self.trees, evaluator, _, _, _ = create_agents(
+            self.trees, evaluator, _, _, self.stop_event = create_agents(
                 "",
                 self.num_processes,
                 1,
@@ -43,7 +43,9 @@ class EngineInterface:
                 tree.start()
         else:
             # Create the tree and evaluator – note that create_agents returns lists.
-            trees, evaluator, _, _, _ = create_agents("", 1, 1, 0, self.chess_net, training=False, verbose=True)
+            trees, evaluator, _, _, self.stop_event = create_agents(
+                "", 1, 1, 0, self.chess_net, training=False, verbose=True
+            )
             self.tree = trees[0]
 
             # Initialize the board (standard starting position)
@@ -53,8 +55,19 @@ class EngineInterface:
 
         # Initialize the board (standard starting position)
         self.current_board = chess.Board()
+        self.evaluators = evaluator
         for ev in evaluator:
             ev.start()
+
+    def close(self, timeout: float = 10.0) -> None:
+        """Stop the evaluator (and, in parallel mode, tree) processes; otherwise they keep the program alive."""
+        self.stop_event.set()
+        processes = self.evaluators + (self.trees if self.parallel else [])
+        for process in processes:
+            process.join(timeout)
+            if process.is_alive():
+                process.terminate()
+                process.join()
 
     def set_rollouts(self, rollout_count: int) -> None:
         self.rollouts = rollout_count

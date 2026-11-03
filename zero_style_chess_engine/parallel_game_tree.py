@@ -5,7 +5,7 @@ from multiprocessing import Queue, Process, Event, synchronize
 from queue import Empty
 from typing import Any, List, Dict, Optional, Tuple
 
-from neural_nets.data.fen_chess_puzzles.curiculum_maker import LichessCuriculum
+from neural_nets.data.fen_chess_puzzles.curriculum import LichessCurriculum
 from zero_style_chess_engine.memory import Turn
 import chess_moves
 import os
@@ -192,7 +192,7 @@ class GameTree(Process):
         stop_event: Optional[synchronize.Event] = None,
         sims: int = 1000,
         maximum_lag: int = 8,
-        curriculum: Optional[LichessCuriculum] = None,
+        curriculum: Optional[LichessCurriculum] = None,
     ) -> None:
 
         super().__init__()

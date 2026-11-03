@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from neural_nets.data.fen_chess_puzzles.curiculum_maker import START_STATE, load_curricula
+from neural_nets.data.fen_chess_puzzles.curriculum import START_STATE, load_curricula
 from util.config import TrainingConfig, parse_training_config
 from zero_style_chess_engine.memory import Memory
 

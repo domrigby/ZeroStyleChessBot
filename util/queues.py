@@ -3,7 +3,7 @@ from torch import multiprocessing
 import copy
 from typing import List, Dict, Optional, Tuple
 from neural_nets.conv_net import ChessNet
-from neural_nets.data.fen_chess_puzzles.curiculum_maker import load_curricula
+from neural_nets.data.fen_chess_puzzles.curriculum import load_curricula
 from util.config import TrainingConfig
 from zero_style_chess_engine.parallel_game_tree import GameTree
 from zero_style_chess_engine.evaluator import NeuralNetHandling

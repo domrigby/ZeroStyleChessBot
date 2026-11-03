@@ -49,8 +49,9 @@ if __name__ == "__main__":
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption("Play vs Chess Engine")
 
-    # Use a font that supports Unicode chess symbols; pieces will be bold.
-    piece_font = pygame.font.SysFont("DejaVu Sans", 36, bold=True)
+    # Use a font that supports Unicode chess symbols: Apple Symbols on macOS, DejaVu Sans on Linux. Not bold: a
+    # synthesised bold fills in the outlined white pieces.
+    piece_font = pygame.font.SysFont("applesymbols,dejavusans", 36)
     button_font = pygame.font.SysFont("Arial", 24)
     status_font = pygame.font.SysFont("Arial", 28)
 
@@ -184,6 +185,7 @@ if __name__ == "__main__":
                             return letter
                 elif event.type == pygame.QUIT:
                     pygame.quit()
+                    engine.close()
                     sys.exit()
 
     # ---- Thread Function for Engine Move ----
@@ -299,4 +301,5 @@ if __name__ == "__main__":
         clock.tick(30)
 
     pygame.quit()
+    engine.close()
     sys.exit()

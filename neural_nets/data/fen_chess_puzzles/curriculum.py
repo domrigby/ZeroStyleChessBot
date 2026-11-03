@@ -10,7 +10,7 @@ CURRICULUM_TAGS = ["mateIn1", "mateIn2", "mateIn3", "mateIn4", "short", "middleG
 START_STATE = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 
-class LichessCuriculum:
+class LichessCurriculum:
     def __init__(self, game_states_dict: Dict[str, Tuple[List[str], List[str]]]):
         """
         :param game_states_dict: tag -> (puzzle FENs, puzzle move sequences)
@@ -48,7 +48,7 @@ class LichessCuriculum:
 
 def load_curricula(
     lichess_csv_db: Optional[str], num_agents: int, positions_per_tag: int = 1000
-) -> List[Optional[LichessCuriculum]]:
+) -> List[Optional[LichessCurriculum]]:
     """
     Read the puzzle CSV once and give each agent its own random sample of positions per curriculum tag.
     :return: one curriculum per agent, or one None per agent (start-position games) if the CSV isn't available
@@ -61,11 +61,11 @@ def load_curricula(
     df = pd.read_csv(lichess_csv_db, usecols=["FEN", "Moves", "Themes"])
     puzzles_by_tag = {tag: df[df["Themes"].str.contains(tag, case=False, na=False)] for tag in CURRICULUM_TAGS}
 
-    curricula: List[Optional[LichessCuriculum]] = []
+    curricula: List[Optional[LichessCurriculum]] = []
     for _ in range(num_agents):
         game_states_dict = {}
         for tag, puzzles in puzzles_by_tag.items():
             sample = puzzles.sample(n=min(positions_per_tag, len(puzzles)))
             game_states_dict[tag] = (sample["FEN"].tolist(), sample["Moves"].tolist())
-        curricula.append(LichessCuriculum(game_states_dict))
+        curricula.append(LichessCurriculum(game_states_dict))
     return curricula
