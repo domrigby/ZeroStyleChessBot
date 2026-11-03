@@ -1,6 +1,7 @@
 from multiprocessing import Queue, Event
 from torch import multiprocessing
 from datetime import datetime
+import copy
 import os
 from typing import List, Dict
 from zero_style_chess_engine.parallel_game_tree import GameTree
@@ -75,7 +76,11 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
     # Evaluator
     evaluators: List[NeuralNetHandling] = []
     for idx in range(num_evaluators):
-        evaluator = NeuralNetHandling(neural_net=network, process_queues=process_queues[idx], weights_queue=weights_queues[idx],
+        # Each evaluator gets its own copy. Spawn pickling would otherwise put the trainer's and evaluators' parameters
+        # in the same shared storage, so an evaluator's load_state_dict would roll back the trainer's weights.
+        # TODO: costs one weights copy per evaluator. For large nets, replace with a single inference copy shared by all
+        #  evaluators, which the trainer copies its weights into every weights_update_freq steps under an mp.Lock.
+        evaluator = NeuralNetHandling(neural_net=copy.deepcopy(network), process_queues=process_queues[idx], weights_queue=weights_queues[idx],
                                      results_queue_dict=results_queue_dicts, batch_size=256, stop_event=stop_event)
         evaluators.append(evaluator)
 
