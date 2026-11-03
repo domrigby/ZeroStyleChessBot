@@ -1,7 +1,7 @@
 import multiprocessing
 import multiprocessing.queues
 import queue
-from typing import Any, Iterator, Tuple, cast
+from typing import Any, Iterator, List, Tuple, cast
 
 import numpy as np
 
@@ -127,3 +127,73 @@ def test_root_priors_come_from_the_evaluator() -> None:
 
     expected = np.arange(1.0, tree.root.number_legal_moves + 1)
     np.testing.assert_allclose(tree.root.Ps, expected / expected.sum())
+
+
+# Qf7 stalemates the black king on h8
+STALEMATE_IN_ONE_FEN = "7k/8/5QK1/8/8/8/8/8 w - - 0 1"
+STALEMATING_MOVE = "f6f7"
+
+
+class ConstantValueEvaluator(InstantEvaluator):
+    """Answers every request with uniform priors and a fixed value, recording each request's legal moves"""
+
+    def __init__(self, results_queue: "queue.Queue[Any]", value: float) -> None:
+        super().__init__(results_queue)
+        self.value = value
+        self.requested_legal_moves: List[List[str]] = []
+
+    def put(self, request: EvalRequest) -> None:
+        self.requested_legal_moves.append(request.legal_moves)
+        num_moves = len(request.legal_moves)
+        uniform_priors = np.full(num_moves, 1.0 / num_moves) if num_moves else np.zeros(0)
+        self.results_queue.put([EvalResult(request.node_id, self.value, uniform_priors)])
+        self.requests_answered += 1
+
+
+def _make_tree_with_value(start_state: str, value: float) -> Tuple[MCTS, ConstantValueEvaluator]:
+    results_queue: "queue.Queue[Any]" = queue.Queue()
+    evaluator = ConstantValueEvaluator(results_queue, value)
+    tree = MCTS(
+        cast(multiprocessing.queues.Queue, evaluator),
+        cast(multiprocessing.queues.Queue, results_queue),
+        agent_id=0,
+        stop_event=multiprocessing.Event(),
+    )
+    tree.reset(start_state)
+    return tree, evaluator
+
+
+def test_game_ending_positions_are_not_sent_to_the_evaluator_and_q_stays_bounded() -> None:
+    # A value of -1 is what a trained network says for the mated side: added to the mate reward it used to give Q = 2
+    tree, evaluator = _make_tree_with_value(MATE_IN_ONE_FEN, value=-1.0)
+
+    tree.search(number_of_expansions=NUM_ROLLOUTS)
+    _drain(tree)
+
+    assert all(legal_moves for legal_moves in evaluator.requested_legal_moves)
+    for node in _all_nodes(tree.root):
+        assert ((node.Qs >= -1.0) & (node.Qs <= 1.0)).all()
+
+
+def test_stalemate_is_valued_as_a_draw_whatever_the_network_says() -> None:
+    tree, _ = _make_tree_with_value(STALEMATE_IN_ONE_FEN, value=0.9)
+
+    tree.search(number_of_expansions=NUM_ROLLOUTS)
+    _drain(tree)
+
+    stalemate_idx = tree.root.moves.index(STALEMATING_MOVE)
+    assert tree.root.Ns[stalemate_idx] > 0
+    assert tree.root.Qs[stalemate_idx] == 0.0
+
+
+def test_revisiting_a_checkmate_backs_up_the_win_every_time() -> None:
+    tree, _ = _make_tree_with_value(MATE_IN_ONE_FEN, value=0.0)
+
+    tree.search(number_of_expansions=NUM_ROLLOUTS)
+    _drain(tree)
+
+    mate_idx = tree.root.moves.index(MATING_MOVE)
+    # Q is the sum of backed-up values over N + 1, so a win on every visit tends to 1. Without the revisit backup
+    # it stays at its first one or two values (0.75 here) however many times the mate is revisited
+    assert tree.root.Ns[mate_idx] >= 20
+    assert tree.root.Qs[mate_idx] > 0.9

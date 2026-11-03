@@ -261,16 +261,21 @@ class MCTS:
                 # If the graph is complete its already been done
                 current_node, reward, done = current_node.expand(move_idx, self.environment, state=current_node.state)
 
-                if reward != 0:
-                    # If this move had reward... we don't need to wait until the value network returns value to send
-                    # the result back up the tree
-                    self.backpropagation(visited_moves, reward, undo_v_loss=False)
-
-                self.send_for_evaluation(current_node, visited_moves, reward)
+                if done:
+                    # A game-ending position's value is exact (the reward): back it up now, draws included, and lift
+                    # the virtual loss set above. The network is never asked
+                    self.backpropagation(visited_moves, reward)
+                else:
+                    self.send_for_evaluation(current_node, visited_moves, reward)
 
                 # If we reach a terminal node not in the main search we still save the game to increase data.
                 if current_node.branch_complete and current_node.game_over_type is not GameOverType.NO_TAKES_DRAW:
                     end_nodes.append(current_node)
+
+            elif visited_moves:
+                # Revisited a game-ending position: back up its exact value (R, set by expand) again. Only full-rollout
+                # mode put virtual losses on this path; otherwise undoing could clear an in-flight evaluation's
+                self.backpropagation(visited_moves, current_node.R, undo_v_loss=self.full_rollout_virtual_loss)
 
             # Now return to root node
             current_node = self.root
