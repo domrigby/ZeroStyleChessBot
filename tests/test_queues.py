@@ -13,7 +13,7 @@ def test_evaluators_do_not_share_parameters_with_the_trainer(tmp_path: Path, mon
     num_trainers = 1
     # Memory loads cwd-relative data
     monkeypatch.chdir(tmp_path)
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=str(tmp_path))
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1)
 
     _, evaluators, trainers, _, _ = create_agents(str(tmp_path), num_agents, num_evaluators, num_trainers, chess_net)
 

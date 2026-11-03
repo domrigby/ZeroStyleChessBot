@@ -4,6 +4,8 @@ from zero_style_chess_engine.memory import Memory
 from zero_style_chess_engine.messages import GameRecord, TrainerStats
 from util.parallel_error_log import error_logger
 from neural_nets.conv_net import ChessNet
+from neural_nets.encoding import tensorise_batch
+from torch.optim import Adam, lr_scheduler
 
 import contextlib
 from typing import ContextManager, List, Optional
@@ -38,6 +40,7 @@ class Trainer(Process):
         update_period: int = 25,
         stop_event: Optional[synchronize.Event] = None,
         generated_data_dir: str = "neural_nets/generated_data",
+        init_lr: float = 0.0001,
     ) -> None:
         """
         :param queue: queue from the tree search
@@ -76,6 +79,11 @@ class Trainer(Process):
         self.generated_data_dir = generated_data_dir
         self.memory: Memory
 
+        # The optimiser and scheduler are built in setup(), in the child process, over the network's parameters
+        self.init_lr = init_lr
+        self.optimiser: Adam
+        self.scheduler: lr_scheduler.OneCycleLR
+
         #  Set up loss plotting windows
         self.value_loss_window = np.zeros(self.update_period)
         self.pol_loss_window = np.zeros(self.update_period)
@@ -103,6 +111,17 @@ class Trainer(Process):
             num_agents=self.num_agents,
             expert_data_path=self.load_path,
             generated_data_dir=self.generated_data_dir,
+        )
+
+        self.optimiser = Adam(self.neural_net.parameters(), lr=self.init_lr, weight_decay=1e-4)
+        self.scheduler = lr_scheduler.OneCycleLR(
+            self.optimiser,
+            max_lr=self.init_lr * 5,
+            total_steps=int(1000e3),
+            pct_start=0.05,  # 5% of steps warming up
+            anneal_strategy="cos",
+            div_factor=25,
+            final_div_factor=1e6,
         )
 
     @error_logger
@@ -194,7 +213,9 @@ class Trainer(Process):
 
         # Do a minibatch of gradient calculation
         states, moves, probs, wins = self.memory.get_batch(self.batch_size, self.expert_ratio)
-        state_tens, moves_tens, wins_tens, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
+        state_tens, moves_tens, wins_tens, legal_move_mask = tensorise_batch(
+            states, moves, probs, wins, self.neural_net.input_size, self.neural_net.output_size, self.neural_net.device
+        )
         total_loss, value_loss, pol_loss = self.neural_net.loss_function(
             state_tens, target=(wins_tens, moves_tens), legal_move_mask=legal_move_mask
         )
@@ -204,9 +225,9 @@ class Trainer(Process):
         if self.training_count % self._batch_to_minibatch_ratio == 0:
             # Every N gradients we actually step the optimiser
             torch.nn.utils.clip_grad_norm_(self.neural_net.parameters(), max_norm=1.0)
-            self.neural_net.optimiser.step()
-            self.neural_net.scheduler.step()
-            self.neural_net.optimiser.zero_grad()
+            self.optimiser.step()
+            self.scheduler.step()
+            self.optimiser.zero_grad()
 
         #  Store some values for plotting
         self.value_loss_window[self.training_count % self.update_period] = value_loss.item()

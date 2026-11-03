@@ -2,6 +2,7 @@ from multiprocessing import Process, Queue, Event, synchronize
 from queue import Empty
 from typing import List, Dict, Optional
 from neural_nets.conv_net import ChessNet
+from neural_nets.encoding import tensorise_inputs
 from zero_style_chess_engine.messages import EvalRequest, EvalResult
 import contextlib
 import time
@@ -91,8 +92,12 @@ class Evaluator(Process):
             return
 
         # Tensorization & Inference
-        state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(
-            [request.fen for request in requests], [request.legal_moves for request in requests]
+        state_tens, legal_move_mask, legal_move_key = tensorise_inputs(
+            [request.fen for request in requests],
+            [request.legal_moves for request in requests],
+            self.neural_net.input_size,
+            self.neural_net.output_size,
+            self.neural_net.device,
         )
 
         self.neural_net.eval()

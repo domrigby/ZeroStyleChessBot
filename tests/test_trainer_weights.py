@@ -23,7 +23,7 @@ def make_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MakeTrainer
     monkeypatch.chdir(tmp_path)
 
     def make(weights_queues: List["queue.Queue[Any]"], weights_update_freq: int) -> Trainer:
-        chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=str(tmp_path))
+        chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1)
         trainer = Trainer(
             save_dir=str(tmp_path),
             neural_net=chess_net,
@@ -95,8 +95,8 @@ def test_undelivered_update_is_replaced_by_the_newest(make_trainer: MakeTrainer)
 def test_scheduler_learning_rate_changes_when_the_optimiser_steps(make_trainer: MakeTrainer) -> None:
     weights_update_freq = 100
     trainer = make_trainer([], weights_update_freq)
-    initial_learning_rate = trainer.neural_net.scheduler.get_last_lr()[0]
+    initial_learning_rate = trainer.scheduler.get_last_lr()[0]
 
     trainer.train_neural_network()
 
-    assert trainer.neural_net.scheduler.get_last_lr()[0] != initial_learning_rate
+    assert trainer.scheduler.get_last_lr()[0] != initial_learning_rate

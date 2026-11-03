@@ -139,10 +139,7 @@ def main() -> None:
         print("Failed to spawn")
         pass
 
-    # Init with a very low learning rate as we are tuning
-    chess_net = ChessNet(
-        input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=config.num_cnn_repeats, init_lr=config.init_lr
-    )
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=config.num_cnn_repeats)
     if config.network_path is not None:
         if not os.path.isfile(config.network_path):
             sys.exit(

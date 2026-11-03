@@ -15,11 +15,9 @@ CLOSE_TIMEOUT_SECONDS = 10.0
 
 def test_close_stops_evaluator_processes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression: human_vs_machine.py hung after its window closed because the evaluator kept running."""
-    monkeypatch.chdir(tmp_path)  # ChessNet creates its save_dir in the cwd
+    monkeypatch.chdir(tmp_path)  # Keep anything the engine writes to the cwd out of the repo
     weights_path = tmp_path / "network.pt"
-    network = ChessNet(
-        input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=ENGINE_NUM_REPEATS, save_dir=str(tmp_path)
-    )
+    network = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=ENGINE_NUM_REPEATS)
     torch.save(network.state_dict(), weights_path)
 
     engine = EngineInterface(network_path=str(weights_path), parallel=False)

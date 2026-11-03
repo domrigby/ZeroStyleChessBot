@@ -1,6 +1,5 @@
 import multiprocessing.queues
 import queue
-from pathlib import Path
 from typing import Any, List, cast
 
 import chess_moves
@@ -22,11 +21,11 @@ def _legal_moves(fen: str) -> List[str]:
     return engine.legal_moves()
 
 
-def test_priors_are_aligned_with_legal_moves_and_a_single_move_gets_all_the_prior(tmp_path: Path) -> None:
+def test_priors_are_aligned_with_legal_moves_and_a_single_move_gets_all_the_prior() -> None:
     # Thread queues stand in for the multiprocessing ones; setup() (compile) isn't needed to evaluate
     request_queue: "queue.Queue[Any]" = queue.Queue()
     result_queue: "queue.Queue[Any]" = queue.Queue()
-    network = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=str(tmp_path))
+    network = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1)
     evaluator = Evaluator(
         neural_net=network,
         eval_request_queues=[cast(multiprocessing.queues.Queue, request_queue)],

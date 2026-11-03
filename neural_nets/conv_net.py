@@ -1,26 +1,65 @@
-from neural_nets.generic_net import GenericNet, ConvBlock, check_input
 from torch import nn
 import torch
 
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 
-class ChessNet(GenericNet):
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels: int, num_repeats: int = 2, activation_period: int = 2) -> None:
+
+        super().__init__()
+
+        convs_list: List[nn.Module] = []
+
+        for idx in range(num_repeats):
+            convs_list.append(nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1))
+            convs_list.append(nn.BatchNorm2d(in_channels))
+            if idx % activation_period == 0:
+                convs_list.append(nn.LeakyReLU())
+
+        self.conv_block = nn.Sequential(*convs_list)
+        self.out_act = nn.LeakyReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        # Perform convolutions
+        out = self.conv_block(x)
+
+        # Skip connection
+        out = out + x
+        out = self.out_act(out)
+
+        return out
+
+
+class ChessNet(nn.Module):
     def __init__(
         self,
-        *args: Any,
+        input_size: Sequence[int],
+        output_size: Sequence[int],
         num_filters: int = 64,
         num_repeats: int = 6,
         policy_loss_factor: float = 1.0,
         value_loss_factor: float = 0.5,
-        **kwargs: Any,
     ) -> None:
+
+        # Initialise nn Module
+        super().__init__()
+
+        # Control inputs and outputs
+        self.input_size = input_size
+        self.output_size = output_size
 
         # Control convolution parameters
         self.num_filters = num_filters
         self.num_repeats = num_repeats
 
-        super().__init__(*args, **kwargs)
+        # Initialise the network
+        self._build_network()
+
+        # Send to CUDA device
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.to(self.device)
 
         self.value_loss = nn.MSELoss()
         self.policy_loss = nn.CrossEntropyLoss()
@@ -62,10 +101,13 @@ class ChessNet(GenericNet):
             nn.Tanh(),
         )
 
-    @check_input
     def forward(
         self, x: torch.Tensor, legal_move_mask: Optional[torch.Tensor] = None, infering: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        x = x.to(self.device)
+        if legal_move_mask is not None:
+            legal_move_mask = legal_move_mask.to(self.device)
 
         x = self.input_conv(x)
         x = self.bn1(x)
@@ -96,7 +138,6 @@ class ChessNet(GenericNet):
         input_tensor: torch.Tensor,
         target: Tuple[torch.Tensor, torch.Tensor],
         legal_move_mask: Optional[torch.Tensor] = None,
-        training: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
         target_value, target_policy = target
@@ -118,3 +159,9 @@ class ChessNet(GenericNet):
         total_loss = self.val_beta * value_loss + self.pol_alpha * policy_loss
 
         return total_loss, value_loss, policy_loss
+
+    def save_network(self, filename: str) -> None:
+        torch.save(self.state_dict(), filename)
+
+    def load_network(self, filename: str) -> None:
+        self.load_state_dict(torch.load(filename))

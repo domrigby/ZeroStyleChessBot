@@ -58,7 +58,7 @@ def main() -> None:
 
     setattr(queues, "Trainer", FaultyTrainer if args.inject_fault else TinyTrainer)
 
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=args.run_dir)
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1)
     chess_net.share_memory()
 
     # A tiny search budget keeps moves fast on CPU; no curriculum or expert data, generated data kept in the run dir

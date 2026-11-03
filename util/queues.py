@@ -142,6 +142,7 @@ def create_agents(
                 stop_event=stop_event,
                 weights_update_freq=config.weights_update_freq,
                 generated_data_dir=config.generated_data_dir,
+                init_lr=config.init_lr,
             )
         )
 
