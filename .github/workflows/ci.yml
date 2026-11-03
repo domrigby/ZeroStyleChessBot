@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies and build chess_moves
+        run: uv sync --frozen
+
+      # The lock resolves Linux torch to the CUDA build; CI has no GPU, so swap in the
+      # CPU wheel of the same version. Kept out of pyproject.toml so GPU users still get CUDA.
+      - name: Swap in CPU-only torch
+        run: |
+          TORCH_VERSION=$(uv run --no-sync python -c "import torch; print(torch.__version__.split('+')[0])")
+          uv pip install --reinstall-package torch "torch==${TORCH_VERSION}" \
+            --index https://download.pytorch.org/whl/cpu
+
+      - name: Run tests
+        run: uv run --no-sync pytest -m "not integration" -v

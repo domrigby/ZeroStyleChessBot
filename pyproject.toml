@@ -11,7 +11,6 @@ dependencies = [
     "numpy>=2.2.6",
     "pandas>=2.2.3",
     "pygame>=2.6.1",
-    "sympy>=1.14.0",
     "tensorboard>=2.19.0",
     "torch>=2.7.0",
     "wandb>=0.19.0",
@@ -20,8 +19,29 @@ dependencies = [
 [dependency-groups]
 dev = [
     "line-profiler>=4.2.0",
+    "pytest>=9.2.0",
 ]
 
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.13"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+# Only the C++ chess_moves extension is installed; the Python code runs from the repo root.
+wheel.packages = []
+
 [tool.uv]
-# Scripts are run from the repo root; the C++ chess_moves module is built separately.
-package = false
+# Rebuild chess_moves whenever the C++ source or build config changes.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "CMakeLists.txt" },
+    { file = "cpp_chess_env/**/*.cpp" },
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: multi-process tests that spawn agents/evaluators/trainers (deselect with -m 'not integration')",
+]

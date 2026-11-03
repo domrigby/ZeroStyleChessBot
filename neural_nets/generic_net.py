@@ -1,5 +1,4 @@
 import torch
-from sympy.abc import epsilon
 from torch import nn
 from torch.optim import Adam
 from torch.optim import lr_scheduler
