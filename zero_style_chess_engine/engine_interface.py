@@ -78,7 +78,8 @@ class EngineInterface:
 
             move_idx = self.mcts.root.moves.index(move_uci) if move_uci in self.mcts.root.moves else None
             if move_idx is not None and move_idx in self.mcts.root.child_nodes:
-                self.mcts.root = self.mcts.root.child_nodes[move_idx]
+                # Keep the search already done below the user's move
+                self.mcts.advance_root(self.mcts.root.child_nodes[move_idx], move_idx)
             else:
                 self.mcts.reset(start_state=self.current_board.fen())
 
@@ -94,6 +95,9 @@ class EngineInterface:
 
         # Convert to Python chess format
         self.current_board.push(chess.Move.from_uci(move))
+
+        # Root the tree at the user's turn, so their reply is looked up among the replies just searched
+        self.mcts.advance_root(node, move_idx)
 
         return move, self.current_board.fen()
 
