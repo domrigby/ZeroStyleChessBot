@@ -1,0 +1,12 @@
+# Defaults live in util/config.py (SupervisedConfig) and reach Hydra through register_defaults.
+# Add a key here only to override a default deliberately.
+# No Hydra output folder, no log file: the script runs in the current directory as before.
+defaults:
+  - supervised_defaults
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .

@@ -1,4 +1,3 @@
-import argparse
 import sys
 import math
 import threading
@@ -8,12 +7,19 @@ from typing import List, Tuple
 import pygame
 import chess
 import chess.engine
+import hydra
+from omegaconf import DictConfig
+
+from util.config import VsStockfishConfig, check_paths_exist, from_hydra, register_defaults
 from zero_style_chess_engine.engine_interface import EngineInterface
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Watch the network play Stockfish.")
-    parser.add_argument("--stockfish_path", type=str, required=True, help="Path to the Stockfish binary.")
-    args = parser.parse_args()
+register_defaults("vs_stockfish_defaults", VsStockfishConfig)
+
+
+@hydra.main(version_base="1.3", config_path="../conf", config_name="vs_stockfish")
+def main(hydra_config: DictConfig) -> None:
+    config = from_hydra(VsStockfishConfig, hydra_config)
+    check_paths_exist(config)
 
     import multiprocessing as mp
 
@@ -41,19 +47,19 @@ if __name__ == "__main__":
 
     # ---- Engine Setup ----
     # Your network-based engine (we'll play White)
-    net_engine = EngineInterface(network_path=r"neural_nets/example_network.pt", num_rollouts=2000)
+    net_engine = EngineInterface(network_path=config.network_path, num_rollouts=config.num_rollouts)
 
     # Stockfish (Black).  Adjust to your binary path:
-    SF_PATH = args.stockfish_path
+    SF_PATH = config.stockfish_path
     sf_engine = chess.engine.SimpleEngine.popen_uci(SF_PATH)
     # Optionally cap strength:
     sf_engine.configure(
         {
             "UCI_LimitStrength": True,
-            "UCI_Elo": 1600,
+            "UCI_Elo": config.stockfish_elo,
         }
     )
-    SF_TIME = 1.0  # seconds per Stockfish move
+    SF_TIME = config.stockfish_move_time  # seconds per Stockfish move
 
     # Central board for display
     board = chess.Board()
@@ -74,7 +80,7 @@ if __name__ == "__main__":
 
     # Background game loop
     def play_game() -> None:
-        global thinking, arrows
+        nonlocal thinking, arrows
         while not board.is_game_over():
             thinking = True
 
@@ -162,3 +168,7 @@ if __name__ == "__main__":
     sf_engine.quit()
     pygame.quit()
     sys.exit()
+
+
+if __name__ == "__main__":
+    main()

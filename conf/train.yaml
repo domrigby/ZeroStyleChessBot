@@ -1,0 +1,10 @@
+# Defaults live in util/config.py (TrainingConfig) and reach Hydra through register_defaults.
+# Add a key here only to override a default deliberately.
+# Hydra's run directory is the training run directory. Continue a run with hydra.run.dir=sessions/run_at_<timestamp>
+defaults:
+  - training_defaults
+  - _self_
+
+hydra:
+  run:
+    dir: sessions/run_at_${now:%Y%m%d_%H%M%S}

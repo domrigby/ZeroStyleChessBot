@@ -1,10 +1,9 @@
 import multiprocessing as mp
 from neural_nets.conv_net import ChessNet
-from util.config import TrainingConfig, parse_training_config
+from util.config import TrainingConfig, check_paths_exist, from_hydra, register_defaults
 from util.queues import create_agents
 from util.training_monitor import ChessEngineMonitor
 from zero_style_chess_engine.messages import GameStats, TrainerStats
-from dataclasses import asdict
 from queue import Empty
 from multiprocessing import synchronize
 from types import FrameType
@@ -14,6 +13,9 @@ import signal
 import sys
 import time
 import wandb
+import hydra
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import DictConfig
 import torch
 import numpy as np
 import random
@@ -122,9 +124,14 @@ def shut_down(children: List[mp.Process], timeout: float) -> None:
             child.join()
 
 
-def main() -> None:
+register_defaults("training_defaults", TrainingConfig)
 
-    config = parse_training_config()
+
+@hydra.main(version_base="1.3", config_path="../conf", config_name="train")
+def main(hydra_config: DictConfig) -> None:
+
+    config = from_hydra(TrainingConfig, hydra_config)
+    check_paths_exist(config)
 
     # Set random seedd
     random.seed(config.seed)
@@ -141,23 +148,18 @@ def main() -> None:
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=config.num_cnn_repeats)
     if config.network_path is not None:
-        if not os.path.isfile(config.network_path):
-            sys.exit(
-                f"Network weights {config.network_path} not found: run scripts/download_weights.sh, "
-                f"or pass --network_path"
-            )
         chess_net.load_network(config.network_path)
     chess_net.share_memory()
 
-    folder_name = config.resolved_run_dir()
-    os.makedirs(folder_name, exist_ok=True)
+    # Hydra creates the run folder; relative to the working directory, as before (sessions/run_at_<timestamp>)
+    folder_name = os.path.relpath(HydraConfig.get().runtime.output_dir)
     print(f"Run folder: {folder_name}")
 
     # Save useful daa with weights and biases (offline: no account or API key needed)
     wandb.init(
         project="ZeroStyleChessBot",
         name=folder_name,
-        config=asdict(config),
+        config=config.model_dump(),
         save_code=True,
         dir=folder_name,
         mode="offline",

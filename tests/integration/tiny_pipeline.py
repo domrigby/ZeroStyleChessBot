@@ -67,7 +67,6 @@ def main() -> None:
         num_evaluators=NUM_EVALUATORS,
         num_trainers=NUM_TRAINERS,
         sims=TINY_SEARCH_SIMULATIONS,
-        run_dir=args.run_dir,
         generated_data_dir=os.path.join(args.run_dir, "generated_data"),
     )
     sys.exit(run_pipeline(args.run_dir, chess_net, config, shutdown_timeout=SHUTDOWN_TIMEOUT_SECONDS))

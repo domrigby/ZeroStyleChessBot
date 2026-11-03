@@ -38,14 +38,20 @@ searches 2000 MCTS simulations per move: about 7 s on an Apple-silicon laptop CP
 
 **Run a short training job on CPU:**
 ```bash
-uv run python -m scripts.parallel_train --num_agents 2 --sims 32
+uv run python -m scripts.parallel_train num_agents=2 sims=32
 ```
 Press Ctrl+C to stop it. It shuts down cleanly and writes a final checkpoint to `sessions/run_at_<timestamp>/`.
-Run `uv run python -m scripts.parallel_train --help` for every option. The defaults (4 agents, 1000 simulations per move)
-are meant for a GPU. Logging goes to TensorBoard and to wandb in offline mode, so no account is needed.
+The defaults (4 agents, 1000 simulations per move) are meant for a GPU. Logging goes to TensorBoard and to wandb in
+offline mode, so no account is needed.
+
+Configuration uses [Hydra](https://hydra.cc) overrides (`key=value`) validated by Pydantic. Every option, with its
+default and a description, is in [`util/config.py`](util/config.py); the YAML files in [`conf/`](conf/) only hold
+Hydra settings. Search constants are nested: `search.c_puct=1.5`. Add `--cfg job` to print the resolved config
+without running. To continue a run, point Hydra at its folder:
+`uv run python -m scripts.parallel_train hydra.run.dir=sessions/run_at_<timestamp>`.
 
 By default, self-play starts from the standard position and uses no expert data. To use the Lichess puzzle
-curriculum or mix in expert games, pass `--curriculum_csv_path` and `--expert_data_path`. The datasets aren't in
+curriculum or mix in expert games, set `curriculum_csv_path=...` and `expert_data_path=...`. The datasets aren't in
 the repo; [`neural_nets/data/data_sources.md`](neural_nets/data/data_sources.md) lists where to get them.
 
 ## Architecture
@@ -86,7 +92,7 @@ the repo; [`neural_nets/data/data_sources.md`](neural_nets/data/data_sources.md)
 - **Virtual loss.** Each rollout puts a temporary penalty on the move it took, so the next rollouts explore other
   branches while the network evaluation is still in flight. The penalty is removed when the value is
   backpropagated.
-- **Batched inference with a maximum lag.** An agent can have up to `--maximum_lag` (default 8) evaluations
+- **Batched inference with a maximum lag.** An agent can have up to `maximum_lag` (default 8) evaluations
   outstanding before it waits for results. This keeps the evaluator's batches full without letting the search run
   far ahead on stale statistics.
 - **Two sources of self-play data.** Every finished game is saved with its outcome as the value target: +1 for
@@ -138,8 +144,8 @@ CI runs all of the above on CPU for every push to `main` and every pull request.
 binding, update `stubs/chess_moves.pyi` by hand.
 
 Other entry points:
-- `uv run python -m scripts.supervised_learning --data_dir DIR`: behavioural-cloning pre-training on pickled games.
-- `uv run python -m scripts.chess_engine_vs_zero_style --stockfish_path PATH`: play the network against Stockfish.
+- `uv run python -m scripts.supervised_learning data_dir=DIR`: behavioural-cloning pre-training on pickled games.
+- `uv run python -m scripts.chess_engine_vs_zero_style stockfish_path=PATH`: play the network against Stockfish.
 
 ## Future work
 

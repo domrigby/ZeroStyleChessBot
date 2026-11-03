@@ -1,4 +1,3 @@
-import argparse
 from torch.utils.data import Dataset, DataLoader
 import torch
 from torch.optim import Adam, lr_scheduler
@@ -11,7 +10,11 @@ import time
 
 from typing import Any, Dict, List, Optional, Sequence, Union
 
+import hydra
+from omegaconf import DictConfig
+
 from neural_nets.conv_net import ChessNet
+from util.config import SupervisedConfig, check_paths_exist, from_hydra, register_defaults
 
 
 class ChessDataset(Dataset):
@@ -112,20 +115,19 @@ class ChessDataset(Dataset):
         return {"state": board_tensor, "move": move_tensor, "player": player, "value": value}
 
 
-if __name__ == "__main__":
-    # Parse arguments for resuming training from a checkpoint
-    parser = argparse.ArgumentParser(description="Train ChessNet with checkpointing.")
-    parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint file to resume training.")
-    parser.add_argument(
-        "--data_dir", type=str, required=True, help="Directory containing train*pkl and test*pkl files."
-    )
-    args = parser.parse_args()
+register_defaults("supervised_defaults", SupervisedConfig)
+
+
+@hydra.main(version_base="1.3", config_path="../conf", config_name="supervised")
+def main(hydra_config: DictConfig) -> None:
+    config = from_hydra(SupervisedConfig, hydra_config)
+    check_paths_exist(config)
 
     # Parameters
-    batch_size = 64
+    batch_size = config.batch_size
 
     # Initialize the network
-    init_lr = 1e-3
+    init_lr = config.init_lr
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64)
     optimiser = Adam(chess_net.parameters(), lr=init_lr, weight_decay=1e-4)
     scheduler = lr_scheduler.OneCycleLR(
@@ -197,8 +199,8 @@ if __name__ == "__main__":
 
     # Check if we need to resume from a checkpoint
     starting_epoch = 0
-    if args.checkpoint:
-        checkpoint = torch.load(args.checkpoint)
+    if config.checkpoint:
+        checkpoint = torch.load(config.checkpoint)
         starting_epoch = checkpoint["epoch"] + 1
         batch_counter = checkpoint["batch_counter"]
         chess_net.load_state_dict(checkpoint["model_state_dict"])
@@ -212,14 +214,14 @@ if __name__ == "__main__":
         rolling_avg_epochs = checkpoint["rolling_avg_epochs"]
         best_val_loss = checkpoint["best_val_loss"]
         best_rolling_avg = checkpoint["best_rolling_avg"]
-        print(f"Resumed training from checkpoint: {args.checkpoint} at epoch {starting_epoch}")
+        print(f"Resumed training from checkpoint: {config.checkpoint} at epoch {starting_epoch}")
 
     # Record start time for elapsed time reporting and checkpointing
     start_time = time.time()
     last_checkpoint_time = time.time()
 
-    train_files = glob.glob(os.path.join(args.data_dir, "train*pkl"))
-    test_files = glob.glob(os.path.join(args.data_dir, "test*pkl"))
+    train_files = glob.glob(os.path.join(config.data_dir, "train*pkl"))
+    test_files = glob.glob(os.path.join(config.data_dir, "test*pkl"))
 
     # Define the test data set size (these are completely unseen games)
     test_dataset = ChessDataset(moves_dir=np.random.choice(test_files), sample_size=100000)
@@ -369,3 +371,7 @@ if __name__ == "__main__":
 
     print(f"Training complete. Best rolling average: {best_rolling_avg:.4f}")
     print(f"Best validation loss: {best_val_loss:.4f}")
+
+
+if __name__ == "__main__":
+    main()
