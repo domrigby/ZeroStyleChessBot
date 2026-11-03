@@ -1,5 +1,7 @@
 # ZeroStyleChessBot
 
+> Note: this project was written by hand in 2024, but cleaned up and modernised using coding agents in 2026
+
 [![CI](https://github.com/domrigby/ZeroStyleChessBot/actions/workflows/ci.yml/badge.svg)](https://github.com/domrigby/ZeroStyleChessBot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
