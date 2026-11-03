@@ -1,135 +1,156 @@
 # ZeroStyleChessBot
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)  
-[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)]  
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)]
+[![CI](https://github.com/domrigby/ZeroStyleChessBot/actions/workflows/ci.yml/badge.svg)](https://github.com/domrigby/ZeroStyleChessBot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
 
----
+An AlphaZero-style chess engine: a ResNet policy/value network guiding Monte-Carlo Tree Search, with move
+generation in a custom C++ engine. The network was pre-trained by behavioural cloning on Lichess games, then
+fine-tuned with parallel self-play reinforcement learning.
 
-## 🚀 Overview
+This is a personal project built on consumer hardware (an RTX 1050 for development and an RTX 3090 for training).
+It's a working pipeline, not a strong engine: there's no formal strength measurement, and the known limitations
+below matter for playing strength. Everything also runs on a CPU-only laptop, slowly.
 
-**ZeroStyleChessBot** is a self-play deep reinforcement learning chess engine combining a convolutional neural network 
-with Monte-Carlo Tree Search (MCTS). Inspired by Google DeepMind’s AlphaZero, it learns to play through:
+![Playing against the engine](docs/human_vs_machine.png)
 
-1. **Behavioral Cloning** on mixed quality games (imitation learning)
-2. **Fine-tuned through Self-Play Reinforcement Learning** with curriculum learning  
+## Quickstart
 
-All training was done on consumer-grade hardware (RTX 1050 for development/RTX 3090 for training), demonstrating how to extract strong performance under compute constraints.
+Requirements: [uv](https://docs.astral.sh/uv/) and a C++17 compiler (Xcode Command Line Tools on macOS,
+`build-essential` on Linux). cmake and ninja are fetched automatically if they aren't installed.
 
-This was a very engaging challenge to implement on extremely limited hardware.
+```bash
+git clone https://github.com/domrigby/ZeroStyleChessBot.git
+cd ZeroStyleChessBot
+uv sync                        # creates .venv and compiles the C++ engine (chess_moves) into it
+scripts/download_weights.sh    # downloads the pretrained network to neural_nets/example_network.pt
+```
 
-> Note: this was a fun, tinkering project and the software is not always commented or written as well as I'd like! I aim to clear this up when I have time
+**Play against the engine** (opens a pygame window):
+```bash
+uv run python human_vs_machine.py
+```
+Drag a piece to its target square, then press **Confirm Move**. The engine's reply is drawn as a blue arrow. It
+searches 2000 MCTS simulations per move: about 7 s on an Apple-silicon laptop CPU, longer on slower machines.
 
----
+**Run a short training job on CPU:**
+```bash
+uv run python parallel_train.py --num_agents 2 --sims 32
+```
+Press Ctrl+C to stop it. It shuts down cleanly and writes a final checkpoint to `sessions/run_at_<timestamp>/`.
+Run `uv run python parallel_train.py --help` for every option. The defaults (4 agents, 1000 simulations per move)
+are meant for a GPU. Logging goes to TensorBoard and to wandb in offline mode, so no account is needed.
 
-## 📚 Key Features
+By default, self-play starts from the standard position and uses no expert data. To use the Lichess puzzle
+curriculum or mix in expert games, pass `--curriculum_csv_path` and `--expert_data_path`. The datasets aren't in
+the repo; [`neural_nets/data/data_sources.md`](neural_nets/data/data_sources.md) lists where to get them.
 
-- **End-to-End RL Pipeline**  
-  - Hot-start via Behavioral Cloning from the Lichess database  
-  - Progressive fine-tuning with self-play RL  
-  - Curriculum of increasing puzzle difficulty  
+## Architecture
 
-- **Neural Network + MCTS**  
-  - ResNet-style policy/value network in PyTorch  
-  - PUCT-based MCTS guided by network priors  
+```
+                parallel_train.py (supervisor)
+   spawns every process and watches for one dying; Ctrl+C or a crash
+   sets the shared stop event, and every process shuts down
+   ──────────────────────────────────────────────────────────────────────
 
-- **Performance Optimizations**  
-  - High-performance C++ core for move generation  
-  - Python bindings for seamless training scripts  
-  - Parallel data collection & batched GPU inference  
+  ┌──────────────────┐   positions to evaluate    ┌────────────────────┐
+  │ GameTree agent×N │ ─────────────────────────▶ │ Evaluator          │
+  │ MCTS self-play,  │   (one queue per agent)    │ batched inference  │
+  │ C++ move gen     │ ◀───────────────────────── │ on its own copy of │
+  └────────┬─────────┘   priors + values          │ the network        │
+           │             (one queue per agent)    └─────────▲──────────┘
+           │ finished games                                 │ state dict every
+           ▼ (experience queue)                             │ weights_update_freq steps
+  ┌──────────────────┐                                      │ (one queue per evaluator,
+  │ Trainer          │ ─────────────────────────────────────┘  maxsize 1)
+  │ replay buffer,   │
+  │ SGD on the net   │
+  └──────────────────┘
+```
 
-- **COMING SOON: Model Distillation**  
-  - Compress high-capacity models into a lightweight network  
-  - Enables real-time play on an RTX 1050  
+- **Agents** (`zero_style_chess_engine/parallel_game_tree.py`) each play self-play games with MCTS. Instead of
+  blocking on the network, an agent sends leaf positions to its evaluator and keeps searching other branches.
+- **Evaluators** (`evaluator.py`) collect requests from all their agents into one batch, run a single forward
+  pass, and send the priors and values back.
+- **The trainer** (`trainer.py`) turns finished games into training data, samples batches from the replay buffer
+  (`memory.py`), trains, and pushes new weights to every evaluator.
+- **The supervisor** (`parallel_train.py`) uses the `spawn` start method. Each process checks a shared stop event, so
+  shutdown is orderly: trainers first (they do the final save), then evaluators, then agents. The exit code is
+  non-zero if any process crashed.
 
----
+## Design notes
 
-## 🏗 Architecture
+- **Virtual loss.** Each rollout puts a temporary penalty on the move it took, so the next rollouts explore other
+  branches while the network evaluation is still in flight. The penalty is removed when the value is
+  backpropagated.
+- **Batched inference with a maximum lag.** An agent can have up to `--maximum_lag` (default 8) evaluations
+  outstanding before it waits for results. This keeps the evaluator's batches full without letting the search run
+  far ahead on stale statistics.
+- **Two sources of self-play data.** Every finished game is saved with its outcome as the value target: +1 for
+  positions of the side that delivered mate, -1 for the other side, 0 for a draw. Games stopped at the 300-move
+  cap have no outcome and are dropped. The agent also saves the terminal lines its search finds, for as long as
+  every move on the line was the best move by Q. This yields extra decisive positions from games that
+  weren't played out.
+- **Entropy-weighted position sampling.** Only two positions from each game go into the replay buffer,
+  sampled in proportion to the entropy of the search policy. Positions where the search was uncertain are kept more
+  often. A floor makes the most uncertain position at most about 10× as likely as the least.
+- **Expert/self-play mixing.** When expert data is given, each training batch mixes expert positions with self-play
+  positions. The expert share starts at 90% and decays by a factor of 0.995 per training step, so pre-training
+  knowledge fades out gradually instead of being overwritten at once.
+- **Curriculum.** With a Lichess puzzle CSV, the first games start from puzzle positions of increasing difficulty
+  (mate-in-2 up to mate-in-5 and "crushing" positions), then switch to the standard starting position.
+- **Exploration.** Dirichlet noise is mixed into the root priors during self-play.
 
-                  ┌──────────────────────────────────────┐
-                  │         PyTorch Policy/Value         │
-                  │     (ResNet + Dual Head: π & V)      │
-                  └──────────────▲──────────────┬────────┘
-                                 │              │
-                                 │              │
-                             priors          value
-                                 │              │
-                  ┌──────────────┴──────────────▼──────────────┐
-                  │            MCTS (PUCT + Rollouts)          │
-                  └──────────────▲─────────────────────────────┘
-                                 │
-                  best move → C++ Engine
-                                 │
-                  ┌──────────────┴──────────────┐
-                  │  Custom C++ Chess Environment │
-                  │  (move generation, rules, etc)│
-                  └──────────────────────────────┘
+## Known limitations
 
----
+- **Only two positions per game reach the replay buffer.** This keeps the buffer closer to IID, but it throws away
+  most positions, including other uncertain ones.
+- **The policy loss is per square.** The policy head outputs 70 move types for each of the 64 from-squares. Training
+  uses a separate cross-entropy for each square, so the network is never trained to pick *which* piece to move.
+  Inference uses one softmax over all legal moves. Switching training to the flattened loss needs a training run to
+  validate.
+- **The C++ engine doesn't generate castling moves.** The castling flags are parsed but not used. The play window
+  has castling buttons for the human side.
+- **Capture-promotions share a policy index with straight promotions** (for example, `b2b1q` and `b2a1q`).
+- **Changed move mask.** Illegal moves now get a very large negative logit instead of 0. The shipped weights were
+  trained with the old mask. On a random network, the new mask gives the same move ranking, but this hasn't been
+  checked yet with the real weights.
+- **Spawn shares parameter memory.** With `spawn`, PyTorch puts the network's parameters in shared memory, so the
+  trainer and evaluators would edit the same weights. Each evaluator therefore gets its own copy, which costs one
+  extra copy of the weights per evaluator. This has been verified on CPU only; on CUDA it's expected to behave the
+  same but hasn't been tested.
 
-## 🎯 Reinforcement Learning Workflow
+## Development
 
-1. **Behavioral Cloning**  
-   - **Data collection:** download and filter Lichess games  
-   - **Curation:** remove timeouts/resignations, ensure IID moves  
-   - **Training:** predict next move and game outcome (policy & value head)  
+```bash
+uv run pytest -m "not integration"            # unit tests, a few seconds
+uv run pytest tests/integration -m "not slow" # multi-process shutdown and fault-injection tests, ~35 s
+uv run ruff check . && uv run ruff format --check .
+uv run mypy                                   # configured in pyproject.toml
+uv run pre-commit install                     # run ruff and mypy on every commit
+```
 
-2. **COMING SOON: Model Distillation**  
-   - Train a smaller network to mimic a high-capacity “teacher”  
-   - Enables fast inference on low-power GPUs  
+CI runs all of the above on CPU for every push to `main` and every pull request. Editing the C++ source
+(`cpp_chess_env/`) or `CMakeLists.txt` makes the next `uv sync` or `uv run` rebuild the engine. If you change a
+binding, update `stubs/chess_moves.pyi` by hand.
 
-3. **Self-Play Fine-Tuning**  
-   - **Curriculum Learning:** start on easy puzzles, ramp up difficulty  
-   - **MCTS Self-Play:** collect trajectories with network-guided search  
-   - **Replay Buffer:** sample mix of self-play and human moves  
-   - **Loss:**  
-     - Cross-entropy (policy)  
-     - MSE (value)  
-     - Distillation regularizer to retain pre-training
----
+Other entry points:
+- `supervised_learning.py --data_dir DIR`: behavioural-cloning pre-training on pickled games.
+- `chess_engine_vs_zero_style.py --stockfish_path PATH`: play the network against Stockfish.
 
-## 🛠 Installation & Usage
+## Future work
 
-1. **Clone the repo**  
-   ```
-   git clone https://github.com/domrigby/ZeroStyleChessBot.git
-   cd ZeroStyleChessBot
-
-2. **Create the Python env and build the C++ engine** (requires [uv](https://docs.astral.sh/uv/) and a C++17 compiler).
-   `uv sync` compiles the `chess_moves` module into `.venv` and rebuilds it when the C++ source changes.
-    ```
-    uv sync
-
-3. **Run tests**
-    ```
-    uv run pytest
-
-4. Run Training
-    ```
-    uv run python paralel_train.py
-
-Play vs. Engine
-
-    uv run python human_vs_machine.py
-
-📈 Results
-
-* ELO Improvement: approximately 1500 ELO.
-
-🔮 Future Work
-
-* Full league training with Nash averaging
-
-* Focus on [high entropy moves during training](https://arxiv.org/abs/2506.01939)
-
-* Distributed training on multi-GPU clusters
-
-📄 License
-
-This project is licensed under the MIT License. See LICENSE for details.
+- Fix the known limitations above, starting with the policy loss.
+- Distil the network into a smaller one for fast play on low-end GPUs.
+- League training and distributed multi-GPU training.
 
 ## Use of LLMs
 
 I wrote the chess playing reinforcement learning part by hand: distributed MCTS, training, evaluation server etc.
 
-LLMs were used to create a lot of the testing and support scripts (PyGame interface, plotting etc.) and helped **a lot** to built the C++ chess simulator.
+LLMs were used to create a lot of the testing and support scripts (PyGame interface, plotting etc.) and helped **a lot** to build the C++ chess simulator.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
