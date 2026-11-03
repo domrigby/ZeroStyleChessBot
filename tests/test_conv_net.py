@@ -74,3 +74,10 @@ def test_masked_training_loss_is_finite(chess_net: ChessNet) -> None:
         for parameter in chess_net.parameters()
         if parameter.grad is not None
     )
+
+
+def test_state_dict_keys_are_unchanged(chess_net: ChessNet) -> None:
+    """Checkpoints load by key: renaming a layer attribute would break every saved .pt file."""
+    expected_keys = (Path(__file__).parent / "fixtures" / "chess_net_state_dict_keys.txt").read_text().split()
+
+    assert list(chess_net.state_dict().keys()) == expected_keys

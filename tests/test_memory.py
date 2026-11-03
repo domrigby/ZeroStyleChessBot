@@ -147,3 +147,25 @@ def test_game_with_zero_entropy_is_sampled_uniformly(
     memory.save_game_to_memory(game, agent_id=0)
 
     assert len(memory.data) == expected_saved
+
+
+def test_expert_batch_has_the_expert_move_with_probability_one(empty_memory_directory: Path) -> None:
+    batch_size = 6
+    expert_positions = [
+        {"fen": START_FEN, "moves": "e2e4", "value": 1.0},
+        {"fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "moves": "e7e5", "value": -1.0},
+    ]
+    expert_directory = empty_memory_directory / "expert"
+    expert_directory.mkdir()
+    with open(expert_directory / "expert.pkl", "wb") as file:
+        pickle.dump(expert_positions, file)
+    memory = Memory(length_buffer=100, expert_data_path=str(expert_directory))
+
+    states, moves, probs, wins = memory.get_batch(batch_size, expert_ratio=1.0)
+
+    assert len(states) == batch_size
+    expected = {(position["fen"], position["moves"], position["value"]) for position in expert_positions}
+    for state, move_set, prob_set, win in zip(states, moves, probs, wins):
+        assert len(move_set) == 1
+        assert prob_set == [1.0]
+        assert (state, move_set[0], win) in expected
