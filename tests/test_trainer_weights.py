@@ -9,22 +9,22 @@ import torch
 
 from neural_nets.conv_net import ChessNet
 from zero_style_chess_engine.memory import DataPoint
-from zero_style_chess_engine.trainer import TrainingProcess
+from zero_style_chess_engine.trainer import Trainer
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 BATCH_SIZE = 4
 
-MakeTrainer = Callable[[List["queue.Queue[Any]"], int], TrainingProcess]
+MakeTrainer = Callable[[List["queue.Queue[Any]"], int], Trainer]
 
 
 @pytest.fixture
 def make_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MakeTrainer:
-    """A TrainingProcess driven in-process, with thread queues standing in for the evaluators' weights queues."""
+    """A Trainer driven in-process, with thread queues standing in for the evaluators' weights queues."""
     monkeypatch.chdir(tmp_path)
 
-    def make(weights_queues: List["queue.Queue[Any]"], weights_update_freq: int) -> TrainingProcess:
-        chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=str(tmp_path))
-        trainer = TrainingProcess(
+    def make(weights_queues: List["queue.Queue[Any]"], weights_update_freq: int) -> Trainer:
+        chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1)
+        trainer = Trainer(
             save_dir=str(tmp_path),
             neural_net=chess_net,
             weights_queues=cast(List[multiprocessing.queues.Queue], weights_queues),
@@ -33,6 +33,7 @@ def make_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MakeTrainer
             min_num_batches_to_train=1,
             weights_update_freq=weights_update_freq,
         )
+        trainer.setup()
         engine = chess_moves.ChessEngine()
         engine.set_fen(START_FEN)
         moves = engine.legal_moves()
@@ -94,8 +95,8 @@ def test_undelivered_update_is_replaced_by_the_newest(make_trainer: MakeTrainer)
 def test_scheduler_learning_rate_changes_when_the_optimiser_steps(make_trainer: MakeTrainer) -> None:
     weights_update_freq = 100
     trainer = make_trainer([], weights_update_freq)
-    initial_learning_rate = trainer.neural_net.scheduler.get_last_lr()[0]
+    initial_learning_rate = trainer.scheduler.get_last_lr()[0]
 
     trainer.train_neural_network()
 
-    assert trainer.neural_net.scheduler.get_last_lr()[0] != initial_learning_rate
+    assert trainer.scheduler.get_last_lr()[0] != initial_learning_rate

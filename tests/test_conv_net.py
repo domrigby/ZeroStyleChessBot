@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from neural_nets.conv_net import ChessNet
+from neural_nets.encoding import tensorise_batch, tensorise_inputs
 
 INPUT_SIZE = [12, 8, 8]
 OUTPUT_SIZE = [70, 8, 8]
@@ -22,9 +23,9 @@ POSITIONS = [
 
 
 @pytest.fixture
-def chess_net(tmp_path: Path) -> ChessNet:
+def chess_net() -> ChessNet:
     torch.manual_seed(0)
-    return ChessNet(input_size=INPUT_SIZE, output_size=OUTPUT_SIZE, num_repeats=1, save_dir=str(tmp_path))
+    return ChessNet(input_size=INPUT_SIZE, output_size=OUTPUT_SIZE, num_repeats=1)
 
 
 def _legal_moves(fen: str) -> List[str]:
@@ -36,7 +37,7 @@ def _legal_moves(fen: str) -> List[str]:
 @pytest.mark.parametrize("fen", POSITIONS)
 def test_illegal_moves_get_no_probability(chess_net: ChessNet, fen: str) -> None:
     chess_net.eval()
-    state, legal_move_mask, _ = chess_net.tensorise_inputs([fen], [_legal_moves(fen)])
+    state, legal_move_mask, _ = tensorise_inputs([fen], [_legal_moves(fen)], INPUT_SIZE, OUTPUT_SIZE, chess_net.device)
 
     with torch.no_grad():
         _, policy = chess_net(state, legal_move_mask, infering=True)
@@ -50,7 +51,9 @@ def test_every_legal_move_target_lies_inside_the_legal_move_mask(chess_net: Ches
     moves = _legal_moves(fen)
     uniform_visits = [1.0 / len(moves)] * len(moves)
 
-    _, target_policy, _, legal_move_mask = chess_net.tensorise_batch([fen], [moves], [uniform_visits], [0.0])
+    _, target_policy, _, legal_move_mask = tensorise_batch(
+        [fen], [moves], [uniform_visits], [0.0], INPUT_SIZE, OUTPUT_SIZE, chess_net.device
+    )
 
     assert (target_policy * (1 - legal_move_mask)).sum().item() == 0.0
 
@@ -59,8 +62,8 @@ def test_masked_training_loss_is_finite(chess_net: ChessNet) -> None:
     fens = [WHITE_FEN, BLACK_FEN, WHITE_PROMOTION_FEN, BLACK_PROMOTION_FEN]
     moves = [_legal_moves(fen) for fen in fens]
     visit_distributions = [[1.0 / len(move_set)] * len(move_set) for move_set in moves]
-    state, target_policy, target_value, legal_move_mask = chess_net.tensorise_batch(
-        fens, moves, visit_distributions, [0.0] * len(fens)
+    state, target_policy, target_value, legal_move_mask = tensorise_batch(
+        fens, moves, visit_distributions, [0.0] * len(fens), INPUT_SIZE, OUTPUT_SIZE, chess_net.device
     )
 
     total_loss, value_loss, policy_loss = chess_net.loss_function(
@@ -74,3 +77,10 @@ def test_masked_training_loss_is_finite(chess_net: ChessNet) -> None:
         for parameter in chess_net.parameters()
         if parameter.grad is not None
     )
+
+
+def test_state_dict_keys_are_unchanged(chess_net: ChessNet) -> None:
+    """Checkpoints load by key: renaming a layer attribute would break every saved .pt file."""
+    expected_keys = (Path(__file__).parent / "fixtures" / "chess_net_state_dict_keys.txt").read_text().split()
+
+    assert list(chess_net.state_dict().keys()) == expected_keys

@@ -3,6 +3,8 @@ from neural_nets.conv_net import ChessNet
 from util.config import TrainingConfig, parse_training_config
 from util.queues import create_agents
 from util.training_monitor import ChessEngineMonitor
+from zero_style_chess_engine.messages import GameStats, TrainerStats
+from dataclasses import asdict
 from queue import Empty
 from multiprocessing import synchronize
 from types import FrameType
@@ -24,7 +26,7 @@ def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, 
     :return: exit code: 0 if every child shut down cleanly, 1 if any child died, exited non-zero or had to be
         terminated
     """
-    agents, evaluators, trainers, data_queues_dicts, stop_event = create_agents(
+    agents, evaluators, trainers, stats_queues, stop_event = create_agents(
         folder_name, config.num_agents, config.num_evaluators, config.num_trainers, chess_net, config=config
     )
     children: List[mp.Process] = [*trainers, *evaluators, *agents]
@@ -45,7 +47,7 @@ def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, 
 
     child_died = False
     try:
-        child_died = monitor_until_stopped(children, data_queues_dicts, stop_event, ChessEngineMonitor(folder_name))
+        child_died = monitor_until_stopped(children, stats_queues, stop_event, ChessEngineMonitor(folder_name))
     finally:
         stop_event.set()
         shut_down(children, shutdown_timeout)
@@ -59,7 +61,7 @@ def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, 
 
 def monitor_until_stopped(
     children: List[mp.Process],
-    data_queues_dicts: Dict[str, List[mp.Queue]],
+    stats_queues: Dict[str, List[mp.Queue]],
     stop_event: synchronize.Event,
     monitor: ChessEngineMonitor,
 ) -> bool:
@@ -78,31 +80,22 @@ def monitor_until_stopped(
 
         received = False
 
-        for queue in data_queues_dicts["agents"]:
+        for queue in [*stats_queues["agents"], *stats_queues["training"]]:
             try:
-                new_data_point = queue.get_nowait()
+                stats = queue.get_nowait()
             except Empty:
                 continue
 
             received = True
-            monitor.update_wins(new_data_point["white_win"])
-            monitor.update_game_lengths(new_data_point["game_length"])
-
-        for queue in data_queues_dicts["training"]:
-            try:
-                new_data_point = queue.get_nowait()
-            except Empty:
-                continue
-
-            received = True
-            if "total_loss" in new_data_point:
-                if new_data_point["total_loss"] != 0:
-                    monitor.update_losses(
-                        new_data_point["total_loss"], new_data_point["value_loss"], new_data_point["policy_loss"]
-                    )
-
-            if "experience_length" in new_data_point:
-                monitor.update_experience(new_data_point["experience_length"])
+            if isinstance(stats, GameStats):
+                monitor.update_wins(stats.white_win)
+                monitor.update_game_lengths(stats.game_length)
+            elif isinstance(stats, TrainerStats):
+                if stats.total_loss != 0:
+                    monitor.update_losses(stats.total_loss, stats.value_loss, stats.policy_loss)
+                monitor.update_experience(stats.experience_length)
+            else:
+                raise TypeError(f"Unexpected message on a stats queue: {stats!r}")
 
         time_now = time.time()
 
@@ -146,10 +139,7 @@ def main() -> None:
         print("Failed to spawn")
         pass
 
-    # Init with a very low learning rate as we are tuning
-    chess_net = ChessNet(
-        input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=config.num_cnn_repeats, init_lr=config.init_lr
-    )
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=config.num_cnn_repeats)
     if config.network_path is not None:
         if not os.path.isfile(config.network_path):
             sys.exit(
@@ -167,7 +157,7 @@ def main() -> None:
     wandb.init(
         project="ZeroStyleChessBot",
         name=folder_name,
-        config=vars(config),
+        config=asdict(config),
         save_code=True,
         dir=folder_name,
         mode="offline",

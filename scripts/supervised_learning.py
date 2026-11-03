@@ -1,6 +1,7 @@
 import argparse
 from torch.utils.data import Dataset, DataLoader
 import torch
+from torch.optim import Adam, lr_scheduler
 import numpy as np
 import chess_moves
 import pickle as pkl
@@ -8,7 +9,7 @@ import glob
 import os
 import time
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from neural_nets.conv_net import ChessNet
 
@@ -110,33 +111,6 @@ class ChessDataset(Dataset):
 
         return {"state": board_tensor, "move": move_tensor, "player": player, "value": value}
 
-    def create_legal_move_mask(self, moves: List[str], team: str) -> Tuple[torch.Tensor, List[List[Any]]]:
-        move_to_indices_lookup: List[List[Any]] = []
-
-        # Collect indices for batch updates
-        all_indices: List[Tuple[int, int, int]] = []
-
-        for legal_move in moves:
-            # Ignore pawn promotions for now
-            if len(str(legal_move)) < 5:
-                if team == "black":
-                    legal_move_str = self.chess_engine.unflip_move(str(legal_move))
-                    indices = self.chess_engine.move_to_target_indices(legal_move_str)
-                else:
-                    indices = self.chess_engine.move_to_target_indices(str(legal_move))
-
-                all_indices.append(indices)
-                move_to_indices_lookup.append([legal_move, indices])
-
-        # Create mask efficiently with batched updates
-        legal_move_mask = torch.zeros((70, 8, 8), dtype=torch.float32)
-        if all_indices:  # only if we have legal moves
-            idx_tensor = torch.tensor(all_indices, dtype=torch.long)  # (N,3)
-            c, r, k = idx_tensor[:, 0], idx_tensor[:, 1], idx_tensor[:, 2]
-            legal_move_mask[c, r, k] = 1.0  # set exactly those cells to 1
-
-        return legal_move_mask, move_to_indices_lookup
-
 
 if __name__ == "__main__":
     # Parse arguments for resuming training from a checkpoint
@@ -151,7 +125,19 @@ if __name__ == "__main__":
     batch_size = 64
 
     # Initialize the network
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64, init_lr=1e-3)
+    init_lr = 1e-3
+    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, num_filters=64)
+    optimiser = Adam(chess_net.parameters(), lr=init_lr, weight_decay=1e-4)
+    scheduler = lr_scheduler.OneCycleLR(
+        optimiser,
+        max_lr=init_lr * 5,
+        total_steps=int(1000e3),
+        pct_start=0.05,  # 5% of steps warming up
+        anneal_strategy="cos",
+        div_factor=25,
+        final_div_factor=1e6,
+    )
+    os.makedirs("networks", exist_ok=True)
 
     import matplotlib.pyplot as plt
 
@@ -216,7 +202,7 @@ if __name__ == "__main__":
         starting_epoch = checkpoint["epoch"] + 1
         batch_counter = checkpoint["batch_counter"]
         chess_net.load_state_dict(checkpoint["model_state_dict"])
-        # chess_net.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        # scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         loss_values = checkpoint["loss_values"]
         value_loss_values = checkpoint["value_loss_values"]
         policy_loss_values = checkpoint["policy_loss_values"]
@@ -258,6 +244,12 @@ if __name__ == "__main__":
             loss, value_loss, policy_loss = chess_net.loss_function(
                 state_tensor, (value_target.float(), move_target_tensor.float())
             )
+
+            # Step the weights
+            optimiser.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(chess_net.parameters(), max_norm=1.0)
+            optimiser.step()
 
             # Update loss values for plotting
             loss_values.append(loss.item())
@@ -309,7 +301,7 @@ if __name__ == "__main__":
                     "epoch": epoch,
                     "batch_counter": batch_counter,
                     "model_state_dict": chess_net.state_dict(),
-                    "scheduler_state_dict": chess_net.scheduler.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
                     "loss_values": loss_values,
                     "value_loss_values": value_loss_values,
                     "policy_loss_values": policy_loss_values,
@@ -328,7 +320,7 @@ if __name__ == "__main__":
                 last_checkpoint_time = time.time()
 
             # Calculate elapsed time and print training progress
-            current_lr = chess_net.scheduler.get_last_lr()[0]
+            current_lr = scheduler.get_last_lr()[0]
             elapsed_time = time.time() - start_time
             hours, rem = divmod(elapsed_time, 3600)  # Get hours and remaining seconds
             minutes, seconds = divmod(rem, 60)  # Get minutes and remaining seconds
@@ -338,7 +330,7 @@ if __name__ == "__main__":
             )
 
             # Update learning rate
-            chess_net.scheduler.step()
+            scheduler.step()
 
         # -------------------- Validation Step --------------------
         chess_net.eval()
@@ -349,9 +341,7 @@ if __name__ == "__main__":
                 state_tensor = batch["state"]
                 move_target_tensor = batch["move"]
                 value_target = batch["value"]
-                loss, _, _ = chess_net.loss_function(
-                    state_tensor, (value_target.float(), move_target_tensor.float()), training=False
-                )
+                loss, _, _ = chess_net.loss_function(state_tensor, (value_target.float(), move_target_tensor.float()))
                 val_loss_total += loss.item()
                 val_batches += 1
         avg_val_loss = val_loss_total / val_batches if val_batches > 0 else float("inf")

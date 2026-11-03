@@ -42,7 +42,7 @@ if __name__ == "__main__":
     THINKING_COLOR = (255, 0, 0)
 
     # ---- Engine Initialization ----
-    engine = EngineInterface(network_path=r"neural_nets/example_network.pt", parallel=False)
+    engine = EngineInterface(network_path=r"neural_nets/example_network.pt")
 
     # ---- Pygame Initialization ----
     pygame.init()
