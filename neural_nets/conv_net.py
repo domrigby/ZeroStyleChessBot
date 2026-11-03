@@ -39,6 +39,8 @@ class ChessNet(nn.Module):
         output_size: Sequence[int],
         num_filters: int = 64,
         num_repeats: int = 6,
+        num_policy_head_blocks: int = 3,
+        num_value_head_blocks: int = 2,
         policy_loss_factor: float = 1.0,
         value_loss_factor: float = 0.5,
     ) -> None:
@@ -53,6 +55,8 @@ class ChessNet(nn.Module):
         # Control convolution parameters
         self.num_filters = num_filters
         self.num_repeats = num_repeats
+        self.num_policy_head_blocks = num_policy_head_blocks
+        self.num_value_head_blocks = num_value_head_blocks
 
         # Initialise the network
         self._build_network()
@@ -81,15 +85,12 @@ class ChessNet(nn.Module):
         self.conv_blocks = nn.Sequential(*conv_block_repeats)
 
         self.policy_head = nn.Sequential(
-            ConvBlock(self.num_filters),
-            ConvBlock(self.num_filters),
-            ConvBlock(self.num_filters),
+            *[ConvBlock(self.num_filters) for _ in range(self.num_policy_head_blocks)],
             nn.Conv2d(self.num_filters, self.output_size[0], kernel_size=3, padding=1),
         )
 
         self.value_head = nn.Sequential(
-            ConvBlock(self.num_filters),
-            ConvBlock(self.num_filters),
+            *[ConvBlock(self.num_filters) for _ in range(self.num_value_head_blocks)],
             nn.Conv2d(self.num_filters, 4, kernel_size=3, padding=1),
             nn.LeakyReLU(),
             nn.Flatten(),
