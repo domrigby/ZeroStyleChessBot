@@ -2,19 +2,19 @@ from neural_nets.generic_net import GenericNet, ConvBlock, check_input
 from torch import nn
 import torch
 
-from typing import List
+from typing import Any, List, Optional, Tuple
 
 
 class ChessNet(GenericNet):
     def __init__(
         self,
-        *args,
+        *args: Any,
         num_filters: int = 64,
         num_repeats: int = 6,
         policy_loss_factor: float = 1.0,
         value_loss_factor: float = 0.5,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
 
         # Control convolution parameters
         self.num_filters = num_filters
@@ -29,7 +29,7 @@ class ChessNet(GenericNet):
         self.pol_alpha: float = policy_loss_factor
         self.val_beta: float = value_loss_factor
 
-    def _build_network(self):
+    def _build_network(self) -> None:
 
         self.activation = nn.LeakyReLU()
         self.input_conv = nn.Conv2d(self.input_size[0], self.num_filters, kernel_size=3, padding=1)
@@ -63,7 +63,9 @@ class ChessNet(GenericNet):
         )
 
     @check_input
-    def forward(self, x: torch.tensor, legal_move_mask: torch.tensor = None, infering: bool = False):
+    def forward(
+        self, x: torch.Tensor, legal_move_mask: Optional[torch.Tensor] = None, infering: bool = False
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         x = self.input_conv(x)
         x = self.bn1(x)
@@ -94,8 +96,12 @@ class ChessNet(GenericNet):
         return value, policy
 
     def loss_function(
-        self, input_tensor: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None, training: bool = True
-    ):
+        self,
+        input_tensor: torch.Tensor,
+        target: Tuple[torch.Tensor, torch.Tensor],
+        legal_move_mask: Optional[torch.Tensor] = None,
+        training: bool = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
         target_value, target_policy = target
         target_value, target_policy = (

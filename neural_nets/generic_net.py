@@ -5,7 +5,7 @@ from torch.optim import lr_scheduler
 from functools import wraps
 import os
 
-from typing import List
+from typing import Any, Callable, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import chess_moves
 import numpy as np
@@ -13,10 +13,12 @@ import numpy as np
 
 chess_engine = chess_moves.ChessEngine()
 
+FunctionType = TypeVar("FunctionType", bound=Callable[..., Any])
 
-def check_input(func):
+
+def check_input(func: FunctionType) -> FunctionType:
     @wraps(func)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         # Ensure `self` has a `device` attribute
         if not hasattr(self, "device"):
             raise AttributeError(
@@ -33,11 +35,13 @@ def check_input(func):
 
         return func(self, *args, **kwargs)
 
-    return wrapper
+    return cast(FunctionType, wrapper)
 
 
 class GenericNet(nn.Module):
-    def __init__(self, input_size: tuple, output_size: tuple, init_lr: float = 0.0001, save_dir: str = "networks"):
+    def __init__(
+        self, input_size: Sequence[int], output_size: Sequence[int], init_lr: float = 0.0001, save_dir: str = "networks"
+    ) -> None:
 
         # Initialise nn Module
         super().__init__()
@@ -72,33 +76,40 @@ class GenericNet(nn.Module):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.to(self.device)
 
-    def _build_network(self):
+    def _build_network(self) -> None:
         """
         Abstract method to build neural network. Create the network parameters in you init
         :return:
         """
         raise NotImplementedError
 
-    def loss_function(self, input: torch.tensor, target: torch.tensor):
+    def loss_function(
+        self,
+        input_tensor: torch.Tensor,
+        target: Tuple[torch.Tensor, torch.Tensor],
+        legal_move_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise NotImplementedError
 
-    def save_network(self, filename: str = None):
+    def save_network(self, filename: Optional[str] = None) -> None:
         if filename is None:
             filename = os.path.join(self.save_dir, self.__class__.__name__) + ".pt"
         torch.save(self.state_dict(), filename)
 
-    def load_network(self, filename: str):
+    def load_network(self, filename: Optional[str]) -> None:
         if filename is None:
             filename = os.path.join(self.save_dir, self.__class__.__name__) + ".pt"
         self.load_state_dict(torch.load(filename))
 
-    def create_legal_move_mask(self, moves, team: str = None):
+    def create_legal_move_mask(
+        self, moves: List[str], team: Optional[str] = None
+    ) -> Tuple[torch.Tensor, List[List[Any]]]:
 
         # Initiliase mvoe to indices look up
-        move_to_indices_lookup = []
+        move_to_indices_lookup: List[List[Any]] = []
 
         # Collect indices for batch updates
-        all_indices = []
+        all_indices: List[Tuple[int, int, int]] = []
 
         # Create mask efficiently with batched updates
         legal_move_mask = torch.zeros(self.output_size, dtype=torch.float32)
@@ -124,21 +135,23 @@ class GenericNet(nn.Module):
         return legal_move_mask, move_to_indices_lookup
 
     @staticmethod
-    def get_move_from_tensor(tensor):
+    def get_move_from_tensor(tensor: np.ndarray) -> str:
         # Returns the argmax move from the tensor
         channel = np.argmax(tensor) // (8 * 8)
         flat_index = np.argmax(tensor) % (8 * 8)
         from_row = flat_index // 8
         from_col = flat_index % 8
 
-        return chess_engine.indices_to_move(channel, from_row, from_col)
+        return chess_engine.indices_to_move(int(channel), int(from_row), int(from_col))
 
     @staticmethod
-    def board_to_tensor(board):
+    def board_to_tensor(board: Any) -> np.ndarray:
         fen = board.fen()
         return chess_engine.fen_to_tensor(fen)
 
-    def tensorise_batch(self, states, moves, probabilities, wins):
+    def tensorise_batch(
+        self, states: List[str], moves: List[List[str]], probabilities: List[List[float]], wins: List[float]
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         state_tens, legal_move_mask, _ = self.tensorise_inputs(states, moves)
 
         batch_size = len(moves)
@@ -164,16 +177,18 @@ class GenericNet(nn.Module):
                 index += 1  # Move to next position
 
         if index > 0:  # Avoid empty scatter calls
-            all_indices = torch.from_numpy(all_indices[:index]).to(self.device, non_blocking=True)
-            all_probs = torch.from_numpy(all_probs[:index]).to(self.device, non_blocking=True)
-            batch_indices = torch.from_numpy(batch_indices[:index]).to(self.device, non_blocking=True)
+            indices_tens = torch.from_numpy(all_indices[:index]).to(self.device, non_blocking=True)
+            probs_tens = torch.from_numpy(all_probs[:index]).to(self.device, non_blocking=True)
+            batch_indices_tens = torch.from_numpy(batch_indices[:index]).to(self.device, non_blocking=True)
 
             # Efficiently scatter values into moves_tens
-            moves_tens[batch_indices, all_indices[:, 0], all_indices[:, 1], all_indices[:, 2]] = all_probs
+            moves_tens[batch_indices_tens, indices_tens[:, 0], indices_tens[:, 1], indices_tens[:, 2]] = probs_tens
 
         return state_tens, moves_tens, value_tens, legal_move_mask
 
-    def tensorise_inputs(self, states, legal_moves):
+    def tensorise_inputs(
+        self, states: List[str], legal_moves: List[List[str]]
+    ) -> Tuple[torch.Tensor, torch.Tensor, List[List[List[Any]]]]:
         """
         Take a set of states and create the neural netwokr input
         :param states:
@@ -190,7 +205,7 @@ class GenericNet(nn.Module):
         # Preallocate NumPy arrays
         fen_tensors = np.empty((batch_size, *self.input_size), dtype=np.float32)
         move_masks = np.empty((batch_size, *self.output_size), dtype=np.float32)
-        legal_move_keys = []
+        legal_move_keys: List[List[List[Any]]] = []
 
         for i, (state, move_set) in enumerate(zip(states, legal_moves)):
             # Convert FEN state to tensor
@@ -212,7 +227,7 @@ class GenericNet(nn.Module):
 
 
 class ConvBlock(nn.Module):
-    def __init__(self, in_channels: int, num_repeats: int = 2, activation_period: int = 2):
+    def __init__(self, in_channels: int, num_repeats: int = 2, activation_period: int = 2) -> None:
 
         super().__init__()
 
@@ -227,7 +242,7 @@ class ConvBlock(nn.Module):
         self.conv_block = nn.Sequential(*convs_list)
         self.out_act = nn.LeakyReLU()
 
-    def forward(self, x: torch.tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         # Perform convolutions
         out = self.conv_block(x)

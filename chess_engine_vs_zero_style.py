@@ -3,6 +3,7 @@ import sys
 import math
 import threading
 import time
+from typing import List, Tuple
 
 import pygame
 import chess
@@ -58,13 +59,13 @@ if __name__ == "__main__":
     board = chess.Board()
 
     # List of (from_xy, to_xy, color) for drawing arrows
-    arrows = []
+    arrows: List[Tuple[Tuple[float, float], Tuple[float, float], Tuple[int, int, int]]] = []
 
     # Thread-safe thinking flag
     thinking = False
 
     # Utility: pixel center of a square index
-    def square_center(sq):
+    def square_center(sq: chess.Square) -> Tuple[float, float]:
         file = chess.square_file(sq)
         rank = 7 - chess.square_rank(sq)
         x = MARGIN + file * SQUARE_SIZE + SQUARE_SIZE / 2
@@ -72,7 +73,7 @@ if __name__ == "__main__":
         return (x, y)
 
     # Background game loop
-    def play_game():
+    def play_game() -> None:
         global thinking, arrows
         while not board.is_game_over():
             thinking = True
@@ -89,6 +90,7 @@ if __name__ == "__main__":
             else:
                 # Black: Stockfish
                 res = sf_engine.play(board, chess.engine.Limit(time=SF_TIME))
+                assert res.move is not None, "Stockfish returned no move"
                 mv = res.move
                 board.push(mv)
                 # Sync your net's internal board state:

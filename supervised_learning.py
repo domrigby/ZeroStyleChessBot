@@ -8,7 +8,7 @@ import glob
 import os
 import time
 
-from typing import List
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from neural_nets.conv_net import ChessNet
 
@@ -17,18 +17,18 @@ class ChessDataset(Dataset):
     def __init__(
         self,
         moves_dir: str,
-        accepted_win_types: List[str] = None,
-        rejected_win_types: List[str] = None,
+        accepted_win_types: Optional[List[str]] = None,
+        rejected_win_types: Optional[List[str]] = None,
         sample_size: int = 2500000,
         random_sample: bool = True,
-    ):
+    ) -> None:
         """
         Initialize the dataset with data from multiple CSV and PGN files.
         """
         self.sample_size = sample_size
         self.dataset_path = moves_dir
 
-        self.games = []  # Each game will have precomputed FEN states and moves
+        self.games: List[Any] = []  # Each game will have precomputed FEN states and moves
         self.chess_engine = chess_moves.ChessEngine()
 
         # Only accept certain win types
@@ -36,7 +36,7 @@ class ChessDataset(Dataset):
         self.rejected_win_types = rejected_win_types
 
         self.move_dirs = glob.glob(moves_dir + "/*")
-        self.all_moves: List[str] = []  # List of all pickle files containing precomputed FEN states and moves
+        self.all_moves: Union[Sequence[Dict[str, Any]], np.ndarray] = []  # Precomputed FEN states and moves
 
         if random_sample:
             self.sample_dataset()
@@ -45,13 +45,13 @@ class ChessDataset(Dataset):
 
         self.chunk_count = 0
 
-    def sample_dataset(self):
+    def sample_dataset(self) -> None:
         with open(self.dataset_path, "rb") as f:
             pickle_moves = pkl.load(f)
             this_sample_size = min(len(pickle_moves), self.sample_size)
             self.all_moves = np.random.choice(pickle_moves, this_sample_size, replace=False)
 
-    def non_random_dataset_chunk(self):
+    def non_random_dataset_chunk(self) -> None:
 
         lb = self.chunk_count * self.sample_size
         ub = (self.chunk_count + 1) * self.sample_size
@@ -61,13 +61,13 @@ class ChessDataset(Dataset):
             ub = min(ub, len(pickle_moves))
             self.all_moves = pickle_moves[lb:ub]
 
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Return the number of games.
         """
         return len(self.all_moves)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
         Get a precomputed FEN state and move for a game.
         """
@@ -110,11 +110,11 @@ class ChessDataset(Dataset):
 
         return {"state": board_tensor, "move": move_tensor, "player": player, "value": value}
 
-    def create_legal_move_mask(self, moves, team):
-        move_to_indices_lookup = []
+    def create_legal_move_mask(self, moves: List[str], team: str) -> Tuple[torch.Tensor, List[List[Any]]]:
+        move_to_indices_lookup: List[List[Any]] = []
 
         # Collect indices for batch updates
-        all_indices = []
+        all_indices: List[Tuple[int, int, int]] = []
 
         for legal_move in moves:
             # Ignore pawn promotions for now

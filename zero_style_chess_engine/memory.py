@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional, Tuple
 import numpy as np
 from enum import Enum
 import pickle as pkl
@@ -14,7 +14,7 @@ class Turn(Enum):
 
 
 class DataPoint:
-    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.0):
+    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.0) -> None:
         self.state: str = state
         self.moves: List[str] = moves
         self.probs: List[float] = probs
@@ -25,11 +25,11 @@ class DataPoint:
 class Memory:
     def __init__(
         self,
-        length_buffer,
-        expert_data_path: str = None,
+        length_buffer: int,
+        expert_data_path: Optional[str] = None,
         num_agents: int = 1,
         generated_data_dir: str = "neural_nets/generated_data",
-    ):
+    ) -> None:
 
         # Save the states. A ring buffer: once full, self.index is the oldest entry, overwritten next
         self.data: List[DataPoint] = []
@@ -52,7 +52,7 @@ class Memory:
             self.last_moves[agent_num] = None
 
         # Deal with expert data
-        self.expert_data = []
+        self.expert_data: List[Dict[str, Any]] = []
         if expert_data_path is not None and os.path.isdir(expert_data_path):
             self.load_expert_data(expert_data_path)
         elif expert_data_path is not None:
@@ -61,10 +61,10 @@ class Memory:
         #  Load data from previous games
         self.load_directory()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data)
 
-    def add_data_point(self, data_point: DataPoint):
+    def add_data_point(self, data_point: DataPoint) -> None:
         """Add to the buffer, overwriting the oldest data point once it holds max_len"""
         if len(self.data) < self.max_len:
             self.data.append(data_point)
@@ -72,7 +72,7 @@ class Memory:
             self.data[self.index] = data_point
         self.index = (self.index + 1) % self.max_len
 
-    def save_game_to_memory(self, game, agent_id):
+    def save_game_to_memory(self, game: List[Dict[str, Any]], agent_id: int) -> None:
         """
         Create a sequence of data points
         :param game:
@@ -82,7 +82,7 @@ class Memory:
 
         game_moves: List[DataPoint] = []
 
-        entropy_of_batch: np.array = np.zeros(len(game))
+        entropy_of_batch: np.ndarray = np.zeros(len(game))
 
         for idx, game_state in enumerate(game):
             # Extract the states
@@ -112,14 +112,17 @@ class Memory:
         # Reason for max adding... so that max entropy is only maximum 10 times more likely than the lowest possible moves
         print(f"Entropy = {entropy_of_batch}")
         entropy_of_batch += 0.1 * entropy_of_batch.max()
-        chosen_moves = np.random.choice(
-            game_moves, size=min(2, len(game_moves)), p=entropy_of_batch / entropy_of_batch.sum(), replace=False
+        chosen_indices = np.random.choice(
+            len(game_moves), size=min(2, len(game_moves)), p=entropy_of_batch / entropy_of_batch.sum(), replace=False
         )
-        for data_point in chosen_moves:
+        for chosen_index in chosen_indices:
+            data_point = game_moves[chosen_index]
             self.add_data_point(data_point)
             self.unsaved_data.append(data_point)
 
-    def get_batch(self, batch_size: int = 32, expert_ratio: float = 1.0):
+    def get_batch(
+        self, batch_size: int = 32, expert_ratio: float = 1.0
+    ) -> Tuple[List[str], List[List[str]], List[List[float]], List[float]]:
         """
         Mixes real and generate data to prevent overfitting to the new data
         """
@@ -145,7 +148,9 @@ class Memory:
 
         return states, moves, probs, wins
 
-    def get_real_data_batch(self, batch_size: int = 32):
+    def get_real_data_batch(
+        self, batch_size: int = 32
+    ) -> Tuple[List[str], List[List[str]], List[List[float]], List[float]]:
         """
         Generate a random batch of data
         :param batch_size: size of the batch
@@ -162,7 +167,7 @@ class Memory:
 
         return states, moves, probs, wins
 
-    def load_directory(self):
+    def load_directory(self) -> None:
         """
         Function loads data from previous runs: the most recent files, up to max_len data points
         :return:
@@ -184,7 +189,7 @@ class Memory:
             for data_point in moves:
                 self.add_data_point(data_point)
 
-    def save_data(self, file_path: str = None):
+    def save_data(self, file_path: Optional[str] = None) -> None:
         if file_path is None:
             now = datetime.now()
             time_string = now.strftime("data_at%Y%m%d_%H%M%S")
@@ -195,7 +200,7 @@ class Memory:
             pkl.dump(self.unsaved_data, f)
         self.unsaved_data = []
 
-    def load_expert_data(self, path: str, file_format: str = "pkl", max_len: int = 250000):
+    def load_expert_data(self, path: str, file_format: str = "pkl", max_len: int = 250000) -> None:
         """
         Collect a certain amount of expert data from the expert data directory. Data should be in the form given by neural_nets/data
         :param path: path to directory
@@ -213,7 +218,9 @@ class Memory:
             if num_collected >= max_len:
                 break
 
-    def get_expert_batch(self, batch_size: int = 32):
+    def get_expert_batch(
+        self, batch_size: int = 32
+    ) -> Tuple[List[str], List[List[str]], List[List[float]], List[float]]:
         """
         Generate a random batch of data
         :param batch_size: size of the batch

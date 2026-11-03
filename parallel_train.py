@@ -4,7 +4,9 @@ from util.config import TrainingConfig, parse_training_config
 from util.queues import create_agents
 from util.training_monitor import ChessEngineMonitor
 from queue import Empty
-from typing import Dict, List
+from multiprocessing import synchronize
+from types import FrameType
+from typing import Dict, List, Optional
 import os
 import signal
 import sys
@@ -25,15 +27,16 @@ def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, 
     agents, evaluators, trainers, data_queues_dicts, stop_event = create_agents(
         folder_name, config.num_agents, config.num_evaluators, config.num_trainers, chess_net, config=config
     )
-    children = [*trainers, *evaluators, *agents]
+    children: List[mp.Process] = [*trainers, *evaluators, *agents]
 
     # Children inherit SIG_IGN for SIGINT, so a Ctrl+C sent to the whole process group doesn't kill them mid-step.
     # They shut down through the stop event instead.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    [child.start() for child in children]
+    for child in children:
+        child.start()
     print("Agent training has commenced.")
 
-    def request_stop(signum, frame):
+    def request_stop(signum: int, frame: Optional[FrameType]) -> None:
         print(f"Received {signal.Signals(signum).name}: shutting down.")
         stop_event.set()
 
@@ -55,7 +58,10 @@ def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, 
 
 
 def monitor_until_stopped(
-    children: List[mp.Process], data_queues_dicts: Dict[str, List[mp.Queue]], stop_event, monitor: ChessEngineMonitor
+    children: List[mp.Process],
+    data_queues_dicts: Dict[str, List[mp.Queue]],
+    stop_event: synchronize.Event,
+    monitor: ChessEngineMonitor,
 ) -> bool:
     """
     Log progress from the children until the stop event is set.
@@ -110,7 +116,7 @@ def monitor_until_stopped(
     return False
 
 
-def shut_down(children: List[mp.Process], timeout: float):
+def shut_down(children: List[mp.Process], timeout: float) -> None:
     """Wait up to timeout in total for the children to exit (the trainer saves first), then terminate stragglers"""
     deadline = time.time() + timeout
     for child in children:
@@ -123,7 +129,7 @@ def shut_down(children: List[mp.Process], timeout: float):
             child.join()
 
 
-def main():
+def main() -> None:
 
     config = parse_training_config()
 

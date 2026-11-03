@@ -1,5 +1,7 @@
+import multiprocessing.queues
 import queue
 from pathlib import Path
+from typing import Any, cast
 
 import chess_moves
 import pytest
@@ -9,7 +11,9 @@ from zero_style_chess_engine.parallel_game_tree import GameTree, Node
 
 @pytest.fixture
 def game_tree(tmp_path: Path) -> GameTree:
-    return GameTree(save_dir=str(tmp_path), experience_queue=queue.Queue())
+    # A thread queue stands in for the multiprocessing queue: same put/get interface, no feeder thread delay
+    experience_queue: "queue.Queue[Any]" = queue.Queue()
+    return GameTree(save_dir=str(tmp_path), experience_queue=cast(multiprocessing.queues.Queue, experience_queue))
 
 
 def _optimal_line(root: Node, depth: int) -> Node:
@@ -36,6 +40,7 @@ def test_save_path_whilst_optimal_keeps_an_even_number_of_positions(
     end_node = _optimal_line(game_tree.root, depth=positions_on_path + 1)
 
     game_tree.save_path_whilst_optimal(end_node)
+    assert game_tree.experience_queue is not None
 
     if expected_saved == 0:
         assert game_tree.experience_queue.empty()

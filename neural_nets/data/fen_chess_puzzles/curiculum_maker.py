@@ -17,7 +17,7 @@ class LichessCuriculum:
         """
         self.game_states_dict = game_states_dict
 
-    def get_start_state(self, episode: int):
+    def get_start_state(self, episode: int) -> Tuple[str, int]:
         board = chess_moves.ChessEngine()
         if episode < 200:
             tag = "mateIn2"
@@ -61,7 +61,7 @@ def load_curricula(
     df = pd.read_csv(lichess_csv_db, usecols=["FEN", "Moves", "Themes"])
     puzzles_by_tag = {tag: df[df["Themes"].str.contains(tag, case=False, na=False)] for tag in CURRICULUM_TAGS}
 
-    curricula = []
+    curricula: List[Optional[LichessCuriculum]] = []
     for _ in range(num_agents):
         game_states_dict = {}
         for tag, puzzles in puzzles_by_tag.items():

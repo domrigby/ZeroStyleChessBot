@@ -1,9 +1,9 @@
 import chess
 import numpy as np
 import time
-from multiprocessing import Queue, Process, Event
+from multiprocessing import Queue, Process, Event, synchronize
 from queue import Empty
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 
 from neural_nets.data.fen_chess_puzzles.curiculum_maker import LichessCuriculum
 from zero_style_chess_engine.memory import Turn
@@ -23,7 +23,7 @@ class GameOverType(Enum):
 
 
 @njit(cache=True)
-def fast_puct(Qs, Ns, Ps, virtual_losses) -> int:
+def fast_puct(Qs: np.ndarray, Ns: np.ndarray, Ps: np.ndarray, virtual_losses: np.ndarray) -> int:
     """numba compatible puct function. Outside class to only compile once"""
 
     visits = np.sum(Ns)
@@ -45,15 +45,21 @@ def fast_puct(Qs, Ns, Ps, virtual_losses) -> int:
 
 
 class Node:
-    def __init__(self, state: str, board: chess_moves.ChessEngine, move_idx: int = None, parent_node: "Node" = None):
+    def __init__(
+        self,
+        state: str,
+        board: chess_moves.ChessEngine,
+        move_idx: Optional[int] = None,
+        parent_node: Optional["Node"] = None,
+    ) -> None:
 
         # The chess fen string object representing this state
         self.state: str = state
         self.player: str = self.state.split()[1]
 
         # Save a reference to the parent node
-        self.parent_node: Node = parent_node  # Reference to the parent move
-        self.move_idx: int = move_idx  # Save the index of the move which created us
+        self.parent_node: Optional[Node] = parent_node  # Reference to the parent move
+        self.move_idx: Optional[int] = move_idx  # Save the index of the move which created us
 
         # Generate child nodes for legal moves
         board.set_fen(self.state)
@@ -62,13 +68,13 @@ class Node:
 
         # Check if we have fully searched the branch
         if self.number_legal_moves == 0:
-            self.branch_complete_reason: str = "No legal moves found"
+            self.branch_complete_reason: Optional[str] = "No legal moves found"
             self.branch_complete = True
         else:
             self.branch_complete = False
 
         self.game_won = False
-        self.game_over_type: GameOverType = None
+        self.game_over_type: Optional[GameOverType] = None
 
         # Create edges
         self.moves = legal_moves
@@ -82,11 +88,11 @@ class Node:
         self.team = Turn.WHITE if self.state.split()[1] == "w" else Turn.BLACK
 
         # State value
-        self.V = 0
-        self.R = 0
+        self.V: float = 0
+        self.R: float = 0
 
         # Set a flag saying it has not been processed yet
-        self.branch_complete_reason: str = None
+        self.branch_complete_reason = None
         self.awaiting_processing: bool = False
 
     def puct(self) -> int:
@@ -96,7 +102,7 @@ class Node:
         move_idx = fast_puct(self.Qs, self.Ns, self.Ps, self.virtual_losses)
         return move_idx
 
-    def expand(self, move_idx: int, board: chess.Board, state: str) -> ("Node", bool, int):
+    def expand(self, move_idx: int, board: chess_moves.ChessEngine, state: str) -> Tuple["Node", float, bool]:
 
         if state is None:
             state = board.fen()  # Update the board state to the provided FEN string
@@ -132,7 +138,7 @@ class Node:
         # Update statistic
         return self.child_nodes[move_idx], reward, done
 
-    def exploratory_select_new_root_node(self, tau: float = 1.0):
+    def exploratory_select_new_root_node(self, tau: float = 1.0) -> Tuple["Node", str, int]:
         """
         Select a random child node with a temperature adjusted probability distribution
         :param tau:
@@ -145,7 +151,7 @@ class Node:
 
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
-    def greedy_select_new_root_node(self):
+    def greedy_select_new_root_node(self) -> Tuple["Node", str, int]:
         """
         Select child node with the highest Q
         :return:
@@ -159,7 +165,7 @@ class Node:
         return self.child_nodes[chosen_move], self.moves[chosen_move], chosen_move
 
     @property
-    def legal_move_strings(self):
+    def legal_move_strings(self) -> List[str]:
         return [str(move) for move in self.moves]
 
 
@@ -174,20 +180,20 @@ class GameTree(Process):
         self,
         save_dir: str,
         training: bool = False,
-        process_queue: Queue = None,
-        experience_queue: Queue = None,
-        results_queue: Queue = None,
-        data_queue: Queue = None,
+        process_queue: Optional[Queue] = None,
+        experience_queue: Optional[Queue] = None,
+        results_queue: Optional[Queue] = None,
+        data_queue: Optional[Queue] = None,
         start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         verbose: bool = False,
-        inference_mode: bool = None,
-        infering_mode_queue: Queue = None,
-        send_results_queue: Queue = None,
-        stop_event: Event = None,
+        inference_mode: bool = False,
+        infering_mode_queue: Optional[Queue] = None,
+        send_results_queue: Optional[Queue] = None,
+        stop_event: Optional[synchronize.Event] = None,
         sims: int = 1000,
         maximum_lag: int = 8,
         curriculum: Optional[LichessCuriculum] = None,
-    ):
+    ) -> None:
 
         super().__init__()
 
@@ -210,9 +216,9 @@ class GameTree(Process):
         self.saved_memory_local = 0
 
         # Link the queues
-        self.environment = None
+        self.environment: Optional[chess_moves.ChessEngine] = None
         self.process_queue = process_queue
-        self.process_queue_node_lookup: Dict[int, tuple] = {}
+        self.process_queue_node_lookup: Dict[int, Tuple[Node, List[Tuple[Node, int]], float]] = {}
 
         self.experience_queue = experience_queue
         self.results_queue = results_queue
@@ -220,11 +226,11 @@ class GameTree(Process):
 
         self.inference_mode: bool = inference_mode
         if self.inference_mode:
-            self.inference_mode_queue: Queue = infering_mode_queue
-            self.send_results_queue: Queue = send_results_queue
+            self.inference_mode_queue: Optional[Queue] = infering_mode_queue
+            self.send_results_queue: Optional[Queue] = send_results_queue
 
-        # Initiate root
-        self.root = None
+        # Initiate root (set by reset below)
+        self.root: Node
         self.start_state = str(start_state)
 
         # Set up the processing stat
@@ -240,12 +246,12 @@ class GameTree(Process):
         # Reset the engine
         self.reset()
 
-    def reset(self, start_state: str = None):
+    def reset(self, start_state: Optional[str] = None) -> None:
         if start_state is None:
             start_state = self.start_state
         self.root = Node(state=start_state, board=chess_moves.ChessEngine())
 
-    def parallel_search(self, current_node: Node = None, number_of_expansions: int = 1000):
+    def parallel_search(self, current_node: Optional[Node] = None, number_of_expansions: int = 1000) -> None:
 
         end_nodes: List[Node] = []
 
@@ -255,7 +261,7 @@ class GameTree(Process):
 
         # Set the root node to the opening state
         if current_node is None:
-            current_node: Node = self.root
+            current_node = self.root
 
         # Perform N rollouts
         for idx in range(number_of_expansions):
@@ -322,6 +328,7 @@ class GameTree(Process):
                     legal_moves = current_node.legal_move_strings
 
                     self.process_queue_node_lookup[node_hash] = (current_node, visited_moves, reward)
+                    assert self.process_queue is not None
                     self.process_queue.put((self.agent_id, node_hash, states, legal_moves))
 
                     # Increment the number of nodes sent for processing
@@ -340,6 +347,7 @@ class GameTree(Process):
 
                 # Below is purely for inference mode when the user is playing it
                 if self.inference_mode:
+                    assert self.send_results_queue is not None and self.inference_mode_queue is not None
                     try:
                         result = self.send_results_queue.get_nowait()
                         if result["send_result"]:
@@ -373,13 +381,15 @@ class GameTree(Process):
                 self.save_path_whilst_optimal(node)
 
     @staticmethod
-    def undo_informationless_rollout(visited_moves):
+    def undo_informationless_rollout(visited_moves: List[Tuple[Node, int]]) -> None:
         for node, move_idx in visited_moves:
             # Undo stats
             node.Ns[move_idx] -= 1
             node.virtual_losses[move_idx] += 1
 
-    def backpropagation(self, visited_moves, observed_reward: float, undo_v_loss: bool = True):
+    def backpropagation(
+        self, visited_moves: List[Tuple[Node, int]], observed_reward: float, undo_v_loss: bool = True
+    ) -> None:
 
         # New incoming state. If win... reward = -1 for current player as they have lost
         gamma_factor = 0.99
@@ -399,7 +409,7 @@ class GameTree(Process):
             node.V = np.max(Qs)
 
             # Only the best rewards propagate up the tree... otherwise player would not choose them
-            reward = -np.copy(node.V)
+            reward = -float(node.V)
 
             if self.full_rollout_virtual_loss and undo_v_loss:
                 # For full rollouts add one back on... some will have mutliple V losses at the same time
@@ -408,9 +418,10 @@ class GameTree(Process):
                 # Set all to zero if not using full rollouts
                 node.virtual_losses[move_idx] = 0
 
-    def save_path_whilst_optimal(self, start_node: Node):
+    def save_path_whilst_optimal(self, start_node: Node) -> None:
         """Find games in which both players have played optimally at least for two moves"""
-        game_states: List[dict] = []
+        game_states: List[Dict[str, Any]] = []
+        assert start_node.parent_node is not None and self.experience_queue is not None
 
         # Get game winner
         if start_node.game_won:
@@ -453,14 +464,15 @@ class GameTree(Process):
 
         self.experience_queue.put((game_states, self.agent_id))
 
-    def save_results_to_memory(self, current_node: Node):
+    def save_results_to_memory(self, current_node: Node) -> None:
+        assert current_node.parent_node is not None and self.experience_queue is not None
 
         if current_node.game_won:
             winner = current_node.parent_node.player
         else:
             winner = None
 
-        game_states = []
+        game_states: List[Dict[str, Any]] = []
 
         # Traverse up the tree and save game states, visit counts, and values
         current_node = current_node.parent_node
@@ -484,10 +496,12 @@ class GameTree(Process):
 
         self.experience_queue.put((game_states, self.agent_id))
 
-    def apply_neural_net_results(self):
+    def apply_neural_net_results(self) -> None:
         """
         Process results from the neural network in batches, updating nodes and applying Dirichlet noise.
         """
+
+        assert self.results_queue is not None
 
         # Clear the queue
         while True:
@@ -542,7 +556,7 @@ class GameTree(Process):
                 #  If we have a processing lag of less than the maximum allowed lag then we can continue
                 return
 
-    def update_node_in_training(self, new_node: Node, action: int):
+    def update_node_in_training(self, new_node: Node, action: int) -> None:
         """
         In training, we remember old visited states to update when we finish games
         """
@@ -552,7 +566,7 @@ class GameTree(Process):
         # Update root node
         self.root = new_node
 
-    def run(self):
+    def run(self) -> None:
         self.environment = chess_moves.ChessEngine()
 
         if not self.inference_mode:
@@ -568,7 +582,7 @@ class GameTree(Process):
                 queue.cancel_join_thread()
 
     @error_logger
-    def train(self, n_games: int = 1000000):
+    def train(self, n_games: int = 1000000) -> None:
 
         game_count = 0
 
@@ -593,7 +607,7 @@ class GameTree(Process):
             main_board.set_fen(start_state)
 
             node = self.root
-            player_check_mated = None
+            player_check_mated: Optional[str] = None
 
             while not main_board.is_game_over() and not self.stop_event.is_set():
                 start_time = time.time()
@@ -649,6 +663,7 @@ class GameTree(Process):
             if self.stop_event.is_set():
                 break
 
+            white_win: Optional[bool]
             if player_check_mated == "w":
                 white_win = False
             elif player_check_mated == "b":
@@ -661,6 +676,7 @@ class GameTree(Process):
 
             game_count += 1
 
-    def send_update_to_main_thread(self, white_win: bool, game_length: int):
+    def send_update_to_main_thread(self, white_win: Optional[bool], game_length: int) -> None:
+        assert self.data_queue is not None
         game_data_dict = {"white_win": white_win, "game_length": game_length}
         self.data_queue.put_nowait(game_data_dict)

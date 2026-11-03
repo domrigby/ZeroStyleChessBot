@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import chess_moves
 import torch
 
@@ -16,7 +18,7 @@ def test_engine_start_position_has_twenty_legal_moves() -> None:
     assert len(engine.legal_moves()) == expected_legal_moves
 
 
-def test_chess_net_forward_pass_on_start_position(tmp_path) -> None:
+def test_chess_net_forward_pass_on_start_position(tmp_path: Path) -> None:
     batch_size = 1
     chess_net = ChessNet(input_size=INPUT_SIZE, output_size=OUTPUT_SIZE, num_repeats=1, save_dir=str(tmp_path))
     chess_net.eval()

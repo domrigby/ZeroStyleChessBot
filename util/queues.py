@@ -1,7 +1,8 @@
-from multiprocessing import Queue, Event
+from multiprocessing import Queue, Event, synchronize
 from torch import multiprocessing
 import copy
-from typing import List, Dict
+from typing import List, Dict, Optional, Tuple
+from neural_nets.conv_net import ChessNet
 from neural_nets.data.fen_chess_puzzles.curiculum_maker import load_curricula
 from util.config import TrainingConfig
 from zero_style_chess_engine.parallel_game_tree import GameTree
@@ -14,14 +15,14 @@ def create_agents(
     num_agents: int,
     num_evaluators: int,
     num_trainers: int,
-    network,
+    network: ChessNet,
     training: bool = True,
     start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     verbose: bool = False,
-    inference_mode_queue: Queue = None,
-    send_results_queue: List[Queue] = None,
-    config: TrainingConfig = None,
-):
+    inference_mode_queue: Optional[Queue] = None,
+    send_results_queue: Optional[List[Queue]] = None,
+    config: Optional[TrainingConfig] = None,
+) -> Tuple[List[GameTree], List[NeuralNetHandling], List[TrainingProcess], Dict[str, List[Queue]], synchronize.Event]:
     """
     This function initialises all the agents and strings and distributes the queues accordingly
     TOOD: get rid of this
@@ -59,21 +60,23 @@ def create_agents(
     curricula = load_curricula(config.curriculum_csv_path if training else None, num_agents)
 
     for idx in range(num_agents):
-        process_queue = Queue()
-        results_queue = Queue()
+        process_queue: Queue = Queue()
+        results_queue: Queue = Queue()
 
         # Create data queue
-        agent_data_queue = Queue()
+        agent_data_queue: Queue = Queue()
         data_queues["agents"].append(agent_data_queue)
 
         process_queues[int(idx // agents_per_evaluator)].append(process_queue)
 
+        training_queue: Optional[Queue]
         if num_trainers:
             training_queue = Queue()
             training_queues[int(idx // agents_per_trainer)].append(training_queue)
         else:
             training_queue = None
 
+        send_queue: Optional[Queue]
         if inference_mode_queue and send_results_queue:
             inference_mode = True
             send_queue = send_results_queue[idx]
@@ -121,7 +124,7 @@ def create_agents(
 
     trainers: List[TrainingProcess] = []
     for idx in range(num_trainers):
-        training_data_queue = Queue()
+        training_data_queue: Queue = Queue()
         data_queues["training"].append(training_data_queue)
         trainers.append(
             TrainingProcess(

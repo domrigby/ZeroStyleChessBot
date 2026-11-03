@@ -75,7 +75,9 @@ def launch_pipeline(tmp_path: Path) -> Iterator[Callable[..., subprocess.Popen]]
             process.wait()
 
 
-def test_sigint_stops_all_children_and_saves_checkpoint(launch_pipeline, tmp_path: Path) -> None:
+def test_sigint_stops_all_children_and_saves_checkpoint(
+    launch_pipeline: Callable[..., subprocess.Popen], tmp_path: Path
+) -> None:
     run_seconds = 20.0
     process = launch_pipeline()
     descendants = _wait_for_children(process)
@@ -89,7 +91,9 @@ def test_sigint_stops_all_children_and_saves_checkpoint(launch_pipeline, tmp_pat
     _assert_no_orphans(descendants)
 
 
-def test_injected_trainer_fault_shuts_down_with_non_zero_exit(launch_pipeline, tmp_path: Path) -> None:
+def test_injected_trainer_fault_shuts_down_with_non_zero_exit(
+    launch_pipeline: Callable[..., subprocess.Popen], tmp_path: Path
+) -> None:
     process = launch_pipeline("--inject_fault")
     descendants = _wait_for_children(process)
 
@@ -99,7 +103,7 @@ def test_injected_trainer_fault_shuts_down_with_non_zero_exit(launch_pipeline, t
 
 
 @pytest.mark.slow
-def test_resident_memory_stays_bounded_over_two_minutes(launch_pipeline) -> None:
+def test_resident_memory_stays_bounded_over_two_minutes(launch_pipeline: Callable[..., subprocess.Popen]) -> None:
     run_seconds = 120.0
     warmup_seconds = 30.0
     sample_period_seconds = 5.0

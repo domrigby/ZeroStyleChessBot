@@ -1,6 +1,6 @@
-from multiprocessing import Process, Queue, Event
+from multiprocessing import Process, Queue, Event, synchronize
 from queue import Empty
-from typing import List, Dict
+from typing import Any, List, Dict, Optional, Tuple
 from neural_nets.conv_net import ChessNet
 import contextlib
 import time
@@ -15,18 +15,18 @@ class NeuralNetHandling(Process):
     def __init__(
         self,
         neural_net: ChessNet,
-        process_queues: List[Queue] = None,
-        weights_queue: Queue = None,
-        results_queue_dict: Dict[int, Queue] = None,
+        process_queues: Optional[List[Queue]] = None,
+        weights_queue: Optional[Queue] = None,
+        results_queue_dict: Optional[Dict[int, Queue]] = None,
         batch_size: int = 64,
-        stop_event: Event = None,
-    ):
+        stop_event: Optional[synchronize.Event] = None,
+    ) -> None:
         """
         :param queue: queue from the tree search
         :param lock:
         """
         super().__init__()
-        self.process_queue = process_queues
+        self.process_queue: Optional[List[Queue]] = process_queues
         self.weights_queue = weights_queue
 
         if results_queue_dict:
@@ -43,7 +43,7 @@ class NeuralNetHandling(Process):
 
         self.processed_count = 0
 
-    def run(self):
+    def run(self) -> None:
         """Optimized function to process queued game states efficiently."""
 
         if self.results_queue is None:
@@ -62,8 +62,12 @@ class NeuralNetHandling(Process):
         for queue in self.results_queue.values():
             queue.cancel_join_thread()
 
-    def collect_and_process(self):
-        agent_ids, hashes, states, legal_moves = [], [], [], []
+    def collect_and_process(self) -> None:
+        agent_ids: List[int] = []
+        hashes: List[int] = []
+        states: List[str] = []
+        legal_moves: List[List[str]] = []
+        assert self.process_queue is not None
 
         # Equal share of the batch per agent. Queue.qsize() isn't used as it raises NotImplementedError on macOS.
         per_queue_allowance = max(1, self.batch_size // len(self.process_queue))
@@ -97,7 +101,7 @@ class NeuralNetHandling(Process):
         # Another improvement was to convert whole bacth to numpy rather than using item as apparently that is slow
         values, policies = values.to("cpu", non_blocking=True).numpy(), policies.to("cpu", non_blocking=True).numpy()
 
-        batched_results = {agent_id: [] for agent_id in set(agent_ids)}
+        batched_results: Dict[int, List[Tuple[Any, ...]]] = {agent_id: [] for agent_id in set(agent_ids)}
 
         # Prepare results for the main thread
         for agent_id, the_hash, policy, value, key in zip(agent_ids, hashes, policies, values, legal_move_key):
@@ -108,7 +112,8 @@ class NeuralNetHandling(Process):
         for agent_id, results in batched_results.items():
             self.results_queue[agent_id].put(results)
 
-    def check_for_network_update(self):
+    def check_for_network_update(self) -> None:
+        assert self.weights_queue is not None
         try:
             new_weights = self.weights_queue.get_nowait()
             self.neural_net.load_state_dict(new_weights)

@@ -2,19 +2,20 @@ import os
 import json
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
+from typing import Dict, List, Optional
 
 
 class ChessEngineMonitor:
-    def __init__(self, save_dir="runs/chess_engine"):
+    def __init__(self, save_dir: str = "runs/chess_engine") -> None:
         self.writer = SummaryWriter(log_dir=save_dir)
         self.save_file = os.path.join(save_dir, "chess_monitor_data.json")
 
         # Data placeholders
         self.win_counts = {"White Wins": 0, "Black Wins": 0, "Draws": 0}
-        self.game_lengths = []
-        self.loss_history = {"Total Loss": [], "Value Loss": [], "Policy Loss": []}
-        self.experience_length = []
-        self.exploration_history = []
+        self.game_lengths: List[int] = []
+        self.loss_history: Dict[str, List[float]] = {"Total Loss": [], "Value Loss": [], "Policy Loss": []}
+        self.experience_length: List[int] = []
+        self.exploration_history: List[float] = []
 
         if os.path.exists(self.save_file):
             self.load_progress()
@@ -23,7 +24,7 @@ class ChessEngineMonitor:
 
         print(f"Tensorboard command: \ntensorboard --logdir={save_dir}")
 
-    def update_wins(self, white_win):
+    def update_wins(self, white_win: Optional[bool]) -> None:
         if white_win:
             self.win_counts["White Wins"] += 1
         elif white_win is not None:
@@ -35,13 +36,13 @@ class ChessEngineMonitor:
         for key, value in self.win_counts.items():
             self.writer.add_scalar(f"Wins/{key}", value, total_games)
 
-    def update_game_lengths(self, new_length):
+    def update_game_lengths(self, new_length: int) -> None:
         self.game_lengths.append(new_length)
         avg_length = sum(self.game_lengths) / len(self.game_lengths)
         self.writer.add_scalar("Game Length/Average", avg_length, self.iteration)
         self.writer.add_histogram("Game Length/Histogram", np.array(self.game_lengths), self.iteration)
 
-    def update_losses(self, total_loss, value_loss, policy_loss):
+    def update_losses(self, total_loss: float, value_loss: float, policy_loss: float) -> None:
         self.loss_history["Total Loss"].append(total_loss)
         self.loss_history["Value Loss"].append(value_loss)
         self.loss_history["Policy Loss"].append(policy_loss)
@@ -50,15 +51,15 @@ class ChessEngineMonitor:
         self.writer.add_scalar("Loss/Value", value_loss, self.iteration)
         self.writer.add_scalar("Loss/Policy", policy_loss, self.iteration)
 
-    def update_experience(self, experience_length: int):
+    def update_experience(self, experience_length: int) -> None:
         self.experience_length.append(experience_length)
         self.writer.add_scalar("Experience Length", experience_length, self.iteration)
 
-    def update_exploration(self, exploration_value):
+    def update_exploration(self, exploration_value: float) -> None:
         self.exploration_history.append(exploration_value)
         self.writer.add_scalar("Exploration/Factor", exploration_value, self.iteration)
 
-    def save_progress(self):
+    def save_progress(self) -> None:
         data = {
             "win_counts": self.win_counts,
             "game_lengths": self.game_lengths,
@@ -70,7 +71,7 @@ class ChessEngineMonitor:
         with open(self.save_file, "w") as f:
             json.dump(data, f, indent=4)
 
-    def load_progress(self):
+    def load_progress(self) -> None:
         try:
             with open(self.save_file, "r") as f:
                 data = json.load(f)
@@ -83,5 +84,5 @@ class ChessEngineMonitor:
         except FileNotFoundError:
             print("No saved progress found.")
 
-    def step(self):
+    def step(self) -> None:
         self.iteration += 1

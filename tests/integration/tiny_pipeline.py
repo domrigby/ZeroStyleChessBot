@@ -8,6 +8,7 @@ import argparse
 import multiprocessing as mp
 import os
 import sys
+from typing import Any, ContextManager
 
 from neural_nets.conv_net import ChessNet
 from parallel_train import run_pipeline
@@ -28,7 +29,7 @@ TINY_SEARCH_SIMULATIONS = 16
 class TinyTrainer(TrainingProcess):
     """Trains on tiny batches so a short CPU run exercises training and weight pushes."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs.update(
             batch_size=TRAINING_BATCH_SIZE,
             minibatch_size=TRAINING_BATCH_SIZE,
@@ -40,7 +41,7 @@ class TinyTrainer(TrainingProcess):
 class FaultyTrainer(TinyTrainer):
     """Raises after a fixed number of run-loop iterations to simulate a crashing trainer."""
 
-    def collect_experience(self, stream_context) -> bool:
+    def collect_experience(self, stream_context: ContextManager[object]) -> bool:
         self.iterations = getattr(self, "iterations", 0) + 1
         if self.iterations > FAULT_AFTER_ITERATIONS:
             raise RuntimeError("Injected trainer fault")
@@ -55,7 +56,7 @@ def main() -> None:
 
     mp.set_start_method("spawn", force=True)
 
-    queues.TrainingProcess = FaultyTrainer if args.inject_fault else TinyTrainer
+    setattr(queues, "TrainingProcess", FaultyTrainer if args.inject_fault else TinyTrainer)
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=args.run_dir)
     chess_net.share_memory()

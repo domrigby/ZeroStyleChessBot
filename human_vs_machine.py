@@ -5,6 +5,7 @@ import pygame
 import chess
 from zero_style_chess_engine.engine_interface import EngineInterface  # Your engine interface module
 import multiprocessing as mp
+from typing import Tuple
 
 if __name__ == "__main__":
     try:
@@ -75,7 +76,7 @@ if __name__ == "__main__":
 
     # ---- Utility Functions ----
 
-    def draw_board(screen, board):
+    def draw_board(screen: pygame.Surface, board: chess.Board) -> None:
         """Draw the chessboard and pieces using the current state from python‑chess."""
         # Draw squares with board offset.
         for row in range(8):
@@ -103,26 +104,32 @@ if __name__ == "__main__":
                     )
                     screen.blit(text_surface, text_rect)
 
-    def draw_button(screen, text, rect):
+    def draw_button(screen: pygame.Surface, text: str, rect: pygame.Rect) -> None:
         """Draw a simple button with the given text."""
         pygame.draw.rect(screen, BUTTON_COLOR, rect)
         text_surf = button_font.render(text, True, BUTTON_TEXT_COLOR)
         text_rect = text_surf.get_rect(center=rect.center)
         screen.blit(text_surf, text_rect)
 
-    def pixel_to_square(x, y):
+    def pixel_to_square(x: int, y: int) -> str:
         """Convert window pixel coordinates to a chess square in algebraic notation (accounting for board offset)."""
         col = int((x - BOARD_X) // SQUARE_SIZE)
         row = int((y - BOARD_Y) // SQUARE_SIZE)
         return chr(ord("a") + col) + str(8 - row)
 
-    def square_center(square):
+    def square_center(square: str) -> Tuple[float, float]:
         """Return the pixel center (x,y) of the given chess square (e.g. 'e2') accounting for board offset."""
         col = ord(square[0]) - ord("a")
         row = 8 - int(square[1])
         return (BOARD_X + col * SQUARE_SIZE + SQUARE_SIZE / 2, BOARD_Y + row * SQUARE_SIZE + SQUARE_SIZE / 2)
 
-    def draw_arrow(screen, start, end, color=ARROW_COLOR, width=3):
+    def draw_arrow(
+        screen: pygame.Surface,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        color: Tuple[int, int, int] = ARROW_COLOR,
+        width: int = 3,
+    ) -> None:
         """Draw an arrow from start to end. Start and end are (x,y) tuples."""
         pygame.draw.line(screen, color, start, end, width)
         angle = math.atan2(end[1] - start[1], end[0] - start[0])
@@ -134,7 +141,7 @@ if __name__ == "__main__":
         pygame.draw.line(screen, color, end, (arrow_x1, arrow_y1), width)
         pygame.draw.line(screen, color, end, (arrow_x2, arrow_y2), width)
 
-    def display_endgame_box(message):
+    def display_endgame_box(message: str) -> None:
         """Display a semi‑transparent overlay box with an endgame message."""
         overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
@@ -146,7 +153,7 @@ if __name__ == "__main__":
         screen.blit(overlay, (0, 0))
         pygame.display.flip()
 
-    def get_promotion_choice():
+    def get_promotion_choice() -> str:
         """Display an overlay for promotion choice and return the chosen letter."""
         overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
@@ -180,7 +187,7 @@ if __name__ == "__main__":
                     sys.exit()
 
     # ---- Thread Function for Engine Move ----
-    def process_engine_move(user_move_str):
+    def process_engine_move(user_move_str: str) -> None:
         global start_square, end_square, dragging, current_drag_pos, engine_thinking, engine_arrow
         if engine.apply_user_move(user_move_str):
             print("User move:", user_move_str)

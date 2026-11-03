@@ -1,12 +1,15 @@
 import os
 import traceback
+from typing import Any, Callable, TypeVar, cast
+
+FunctionType = TypeVar("FunctionType", bound=Callable[..., Any])
 
 
-def error_logger(func):
+def error_logger(func: FunctionType) -> FunctionType:
     """Decorator to log errors to a file defined in the class property, then re-raise them so the
     process exits with a non-zero exit code."""
 
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         try:
             return func(self, *args, **kwargs)
         except Exception as e:
@@ -24,4 +27,4 @@ def error_logger(func):
             print(f"Error logged in {log_file}")
             raise
 
-    return wrapper
+    return cast(FunctionType, wrapper)

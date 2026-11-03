@@ -1,12 +1,11 @@
-from multiprocessing import Process, Queue, Event
+from multiprocessing import Process, Queue, Event, synchronize
 from queue import Empty, Full
 from zero_style_chess_engine.memory import Memory
 from util.parallel_error_log import error_logger
 from neural_nets.conv_net import ChessNet
-from neural_nets.generic_net import GenericNet
 
 import contextlib
-from typing import List
+from typing import ContextManager, List, Optional
 import numpy as np
 import time
 import os.path
@@ -24,21 +23,21 @@ class TrainingProcess(Process):
         self,
         save_dir: str,
         neural_net: ChessNet,
-        experience_queues: List[Queue] = None,
-        weights_queues: List[Queue] = None,
+        experience_queues: Optional[List[Queue]] = None,
+        weights_queues: Optional[List[Queue]] = None,
         batch_size: int = 1024,
         minibatch_size: int = 32,
         min_num_batches_to_train: int = 128,
         num_agents: int = 1,
-        data_queue: Queue = None,
-        load_path: str = None,
+        data_queue: Optional[Queue] = None,
+        load_path: Optional[str] = None,
         weights_update_freq: int = 100,
         expert_ratio: float = 0.9,
         expert_ratio_decay_rate: float = 0.995,
         update_period: int = 25,
-        stop_event: Event = None,
+        stop_event: Optional[synchronize.Event] = None,
         generated_data_dir: str = "neural_nets/generated_data",
-    ):
+    ) -> None:
         """
         :param queue: queue from the tree search
         :param lock:
@@ -51,7 +50,7 @@ class TrainingProcess(Process):
         self.log_file_name = os.path.join(save_dir, f"{self.__class__.__name__}.txt")
 
         #  Set up the queues
-        self.experience_queue = experience_queues
+        self.experience_queue: Optional[List[Queue]] = experience_queues
         self.data_queue = data_queue
         self.weights_queues: List[Queue] = weights_queues if weights_queues is not None else []
 
@@ -68,7 +67,7 @@ class TrainingProcess(Process):
         self.expert_ratio_decay_rate: float = expert_ratio_decay_rate
 
         # Save the neural network
-        self.neural_net: GenericNet = neural_net
+        self.neural_net: ChessNet = neural_net
 
         # Initialise the memory... this handles all the experiences
         self.memory = Memory(
@@ -86,7 +85,7 @@ class TrainingProcess(Process):
         self.games_played: int = 0
         self.training_count: int = 0
 
-    def set_experience_queue(self, experience_queue: Queue):
+    def set_experience_queue(self, experience_queue: List[Queue]) -> None:
         """
         Func to set the experience queue
         :param experience_queue:
@@ -95,7 +94,7 @@ class TrainingProcess(Process):
         self.experience_queue = experience_queue
 
     @error_logger
-    def run(self):
+    def run(self) -> None:
         """
         Main running loop for the trainer. It waits for incoming data and then begins to train the network once there is
         sufficient data.
@@ -141,15 +140,16 @@ class TrainingProcess(Process):
         self.memory.save_data()
 
         # Don't block exit flushing queues whose readers have already stopped
-        for queue in self.weights_queues + [self.data_queue]:
+        for queue in [*self.weights_queues, self.data_queue]:
             if queue is not None:
                 queue.cancel_join_thread()
 
-    def collect_experience(self, stream_context) -> bool:
+    def collect_experience(self, stream_context: ContextManager[object]) -> bool:
         """
         Move finished games from the agents into memory, doing a training step per game.
         :return: whether any game was received
         """
+        assert self.experience_queue is not None
         received = False
         for queue in self.experience_queue:
             for _ in range(self.batch_size):
@@ -169,7 +169,7 @@ class TrainingProcess(Process):
                         self.train_neural_network()
         return received
 
-    def train_neural_network(self):
+    def train_neural_network(self) -> None:
         """Train the neural network using the experiences from the memory"""
 
         if len(self.memory) < self.min_num_batches_to_train * self.batch_size:
@@ -180,9 +180,9 @@ class TrainingProcess(Process):
 
         # Do a minibatch of gradient calculation
         states, moves, probs, wins = self.memory.get_batch(self.batch_size, self.expert_ratio)
-        state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
+        state_tens, moves_tens, wins_tens, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
         total_loss, value_loss, pol_loss = self.neural_net.loss_function(
-            state, target=(wins, moves), legal_move_mask=legal_move_mask
+            state_tens, target=(wins_tens, moves_tens), legal_move_mask=legal_move_mask
         )
         # Compute the gradients
         total_loss.backward()
@@ -205,7 +205,7 @@ class TrainingProcess(Process):
         if self.training_count % self.weights_update_freq == 0:
             self.send_weights_update()
 
-    def send_weights_update(self):
+    def send_weights_update(self) -> None:
         weights = {k: v.cpu() for k, v in self.neural_net.state_dict().items()}
         for queue in self.weights_queues:
             try:

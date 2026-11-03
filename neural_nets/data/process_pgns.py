@@ -1,7 +1,7 @@
 import argparse
 import chess.pgn
 from enum import Enum
-from typing import List
+from typing import List, Optional
 import glob
 import os
 import pickle
@@ -12,7 +12,7 @@ class WinTypes(Enum):
 
 
 class PGNLoader:
-    def __init__(self, pgn_dir: str, rejected_win_types: List[WinTypes] = None):
+    def __init__(self, pgn_dir: str, rejected_win_types: Optional[List[WinTypes]] = None):
 
         if rejected_win_types is None:
             rejected_win_types = []

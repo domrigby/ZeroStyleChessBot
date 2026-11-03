@@ -64,6 +64,7 @@ def test_curriculum_gives_every_agent_puzzle_start_states(tmp_path: Path) -> Non
 
     assert len(curricula) == num_agents
     for curriculum in curricula:
+        assert curriculum is not None
         start_state, _ = curriculum.get_start_state(FIRST_CURRICULUM_EPISODE)
         assert start_state != START_STATE
         assert curriculum.get_start_state(CURRICULUM_EPISODE_LIMIT)[0] == START_STATE

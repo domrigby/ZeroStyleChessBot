@@ -1,6 +1,7 @@
+import multiprocessing.queues
 import queue
 from pathlib import Path
-from typing import List
+from typing import Any, Callable, List, cast
 
 import chess_moves
 import pytest
@@ -13,18 +14,20 @@ from zero_style_chess_engine.trainer import TrainingProcess
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 BATCH_SIZE = 4
 
+MakeTrainer = Callable[[List["queue.Queue[Any]"], int], TrainingProcess]
+
 
 @pytest.fixture
-def make_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def make_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MakeTrainer:
     """A TrainingProcess driven in-process, with thread queues standing in for the evaluators' weights queues."""
     monkeypatch.chdir(tmp_path)
 
-    def make(weights_queues: List[queue.Queue], weights_update_freq: int) -> TrainingProcess:
+    def make(weights_queues: List["queue.Queue[Any]"], weights_update_freq: int) -> TrainingProcess:
         chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=str(tmp_path))
         trainer = TrainingProcess(
             save_dir=str(tmp_path),
             neural_net=chess_net,
-            weights_queues=weights_queues,
+            weights_queues=cast(List[multiprocessing.queues.Queue], weights_queues),
             batch_size=BATCH_SIZE,
             minibatch_size=BATCH_SIZE,
             min_num_batches_to_train=1,
@@ -40,7 +43,7 @@ def make_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return make
 
 
-def _drain(weights_queue: queue.Queue) -> list:
+def _drain(weights_queue: "queue.Queue[Any]") -> List[Any]:
     received = []
     while True:
         try:
@@ -58,10 +61,10 @@ def _drain(weights_queue: queue.Queue) -> list:
     ],
 )
 def test_every_evaluator_receives_exactly_one_update_per_freq_steps(
-    make_trainer, steps: int, weights_update_freq: int
+    make_trainer: MakeTrainer, steps: int, weights_update_freq: int
 ) -> None:
     num_evaluators = 2
-    weights_queues = [queue.Queue(maxsize=1) for _ in range(num_evaluators)]
+    weights_queues: List["queue.Queue[Any]"] = [queue.Queue(maxsize=1) for _ in range(num_evaluators)]
     trainer = make_trainer(weights_queues, weights_update_freq)
     received_counts = [0] * num_evaluators
 
@@ -73,10 +76,10 @@ def test_every_evaluator_receives_exactly_one_update_per_freq_steps(
     assert received_counts == [steps // weights_update_freq] * num_evaluators
 
 
-def test_undelivered_update_is_replaced_by_the_newest(make_trainer) -> None:
+def test_undelivered_update_is_replaced_by_the_newest(make_trainer: MakeTrainer) -> None:
     weights_update_freq = 1
     steps = 3
-    weights_queue = queue.Queue(maxsize=1)
+    weights_queue: "queue.Queue[Any]" = queue.Queue(maxsize=1)
     trainer = make_trainer([weights_queue], weights_update_freq)
 
     for _ in range(steps):
@@ -88,7 +91,7 @@ def test_undelivered_update_is_replaced_by_the_newest(make_trainer) -> None:
         assert torch.equal(delivered[0][name], tensor.cpu())
 
 
-def test_scheduler_learning_rate_changes_when_the_optimiser_steps(make_trainer) -> None:
+def test_scheduler_learning_rate_changes_when_the_optimiser_steps(make_trainer: MakeTrainer) -> None:
     weights_update_freq = 100
     trainer = make_trainer([], weights_update_freq)
     initial_learning_rate = trainer.neural_net.scheduler.get_last_lr()[0]
