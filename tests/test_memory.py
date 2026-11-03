@@ -125,3 +125,25 @@ def test_save_data_writes_only_unsaved_data_points(empty_memory_directory: Path)
     for file_name in (first_file, second_file):
         with open(file_name, "rb") as file:
             assert len(pickle.load(file)) == points_per_game
+
+
+@pytest.mark.parametrize(
+    "game_length, expected_saved",
+    [
+        pytest.param(1, 1, id="single_position"),
+        pytest.param(3, 2, id="several_positions"),
+    ],
+)
+def test_game_with_zero_entropy_is_sampled_uniformly(
+    empty_memory_directory: Path, game_length: int, expected_saved: int
+) -> None:
+    """Every position's visits on one move gives zero entropy; sampling by entropy used to divide 0 by 0."""
+    moves = _start_position_moves()
+    visit_counts = np.zeros(len(moves))
+    visit_counts[0] = 1
+    game = [{"state": START_FEN, "moves": moves, "visit_counts": visit_counts, "value": 0} for _ in range(game_length)]
+    memory = Memory(length_buffer=100)
+
+    memory.save_game_to_memory(game, agent_id=0)
+
+    assert len(memory.data) == expected_saved

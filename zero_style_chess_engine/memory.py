@@ -112,6 +112,9 @@ class Memory:
         # Reason for max adding... so that max entropy is only maximum 10 times more likely than the lowest possible moves
         print(f"Entropy = {entropy_of_batch}")
         entropy_of_batch += 0.1 * entropy_of_batch.max()
+        if entropy_of_batch.sum() == 0:
+            # Every position had all its visits on one move: sample uniformly instead of dividing 0 by 0
+            entropy_of_batch[:] = 1.0
         chosen_indices = np.random.choice(
             len(game_moves), size=min(2, len(game_moves)), p=entropy_of_batch / entropy_of_batch.sum(), replace=False
         )

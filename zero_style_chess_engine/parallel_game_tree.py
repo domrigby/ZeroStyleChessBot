@@ -474,16 +474,16 @@ class GameTree(Process):
 
         game_states: List[Dict[str, Any]] = []
 
-        # Traverse up the tree and save game states, visit counts, and values
-        current_node = current_node.parent_node
+        # Traverse up the tree to the game's starting position and save game states, visit counts, and values
+        position: Optional[Node] = current_node.parent_node
 
-        while current_node.parent_node is not None:
-            state = current_node.state
-            moves = current_node.moves
-            visit_counts = current_node.Ns
+        while position is not None:
+            state = position.state
+            moves = position.moves
+            visit_counts = position.Ns
 
             if winner is not None:
-                if current_node.player == winner:
+                if position.player == winner:
                     value = 1
                 else:
                     value = -1
@@ -492,7 +492,7 @@ class GameTree(Process):
 
             game_states.append({"state": state, "moves": moves, "visit_counts": visit_counts, "value": value})
             self.saved_memory_local += 1
-            current_node = current_node.parent_node
+            position = position.parent_node
 
         self.experience_queue.put((game_states, self.agent_id))
 
@@ -655,9 +655,10 @@ class GameTree(Process):
                     # Increment move count
                     move_count += 1
 
-                # Here we search down the tree using the best moves and see if there is a checkmate
-                if self.root.branch_complete:
-                    self.save_results_to_memory(self.root)
+                # Save the played game once it's over. A game-ending move doesn't advance the root, so check the board
+                # and the node just played, not self.root. The engine also ends games python-chess doesn't (50 moves)
+                if main_board.is_game_over() or node.branch_complete:
+                    self.save_results_to_memory(node)
                     break
 
             if self.stop_event.is_set():
