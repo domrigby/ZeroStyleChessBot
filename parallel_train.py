@@ -15,7 +15,7 @@ import numpy as np
 import random
 
 
-def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, shutdown_timeout: float = 60.) -> int:
+def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, shutdown_timeout: float = 60.0) -> int:
     """
     Start the agents, evaluators and trainers, monitor them until SIGINT/SIGTERM or until a child dies, then shut
     them all down.
@@ -23,7 +23,8 @@ def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, 
         terminated
     """
     agents, evaluators, trainers, data_queues_dicts, stop_event = create_agents(
-        folder_name, config.num_agents, config.num_evaluators, config.num_trainers, chess_net, config=config)
+        folder_name, config.num_agents, config.num_evaluators, config.num_trainers, chess_net, config=config
+    )
     children = [*trainers, *evaluators, *agents]
 
     # Children inherit SIG_IGN for SIGINT, so a Ctrl+C sent to the whole process group doesn't kill them mid-step.
@@ -53,8 +54,9 @@ def run_pipeline(folder_name: str, chess_net: ChessNet, config: TrainingConfig, 
     return 1 if child_died or failed_children else 0
 
 
-def monitor_until_stopped(children: List[mp.Process], data_queues_dicts: Dict[str, List[mp.Queue]],
-                          stop_event, monitor: ChessEngineMonitor) -> bool:
+def monitor_until_stopped(
+    children: List[mp.Process], data_queues_dicts: Dict[str, List[mp.Queue]], stop_event, monitor: ChessEngineMonitor
+) -> bool:
     """
     Log progress from the children until the stop event is set.
     :return: True if a child died before the stop event was set
@@ -62,7 +64,6 @@ def monitor_until_stopped(children: List[mp.Process], data_queues_dicts: Dict[st
     start_time = time.time()
 
     while not stop_event.is_set():
-
         dead_children = [child for child in children if not child.is_alive()]
         if dead_children:
             for child in dead_children:
@@ -71,32 +72,31 @@ def monitor_until_stopped(children: List[mp.Process], data_queues_dicts: Dict[st
 
         received = False
 
-        for queue in data_queues_dicts['agents']:
-
+        for queue in data_queues_dicts["agents"]:
             try:
                 new_data_point = queue.get_nowait()
             except Empty:
                 continue
 
             received = True
-            monitor.update_wins(new_data_point['white_win'])
-            monitor.update_game_lengths(new_data_point['game_length'])
+            monitor.update_wins(new_data_point["white_win"])
+            monitor.update_game_lengths(new_data_point["game_length"])
 
-        for queue in data_queues_dicts['training']:
-
+        for queue in data_queues_dicts["training"]:
             try:
                 new_data_point = queue.get_nowait()
             except Empty:
                 continue
 
             received = True
-            if 'total_loss' in new_data_point:
-                if new_data_point['total_loss'] != 0:
-                    monitor.update_losses(new_data_point['total_loss'], new_data_point['value_loss'],
-                                        new_data_point['policy_loss'])
+            if "total_loss" in new_data_point:
+                if new_data_point["total_loss"] != 0:
+                    monitor.update_losses(
+                        new_data_point["total_loss"], new_data_point["value_loss"], new_data_point["policy_loss"]
+                    )
 
-            if 'experience_length' in new_data_point:
-                monitor.update_experience(new_data_point['experience_length'])
+            if "experience_length" in new_data_point:
+                monitor.update_experience(new_data_point["experience_length"])
 
         time_now = time.time()
 
@@ -111,10 +111,10 @@ def monitor_until_stopped(children: List[mp.Process], data_queues_dicts: Dict[st
 
 
 def shut_down(children: List[mp.Process], timeout: float):
-    """ Wait up to timeout in total for the children to exit (the trainer saves first), then terminate stragglers """
+    """Wait up to timeout in total for the children to exit (the trainer saves first), then terminate stragglers"""
     deadline = time.time() + timeout
     for child in children:
-        child.join(max(0., deadline - time.time()))
+        child.join(max(0.0, deadline - time.time()))
 
     for child in children:
         if child.is_alive():
@@ -134,19 +134,22 @@ def main():
     torch.cuda.manual_seed_all(config.seed)
 
     try:
-       mp.set_start_method('spawn', force=True)
-       print("Multi-processing spawned.")
+        mp.set_start_method("spawn", force=True)
+        print("Multi-processing spawned.")
     except RuntimeError:
         print("Failed to spawn")
         pass
 
     # Init with a very low learning rate as we are tuning
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=config.num_cnn_repeats,
-                         init_lr=config.init_lr)
+    chess_net = ChessNet(
+        input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=config.num_cnn_repeats, init_lr=config.init_lr
+    )
     if config.network_path is not None:
         if not os.path.isfile(config.network_path):
-            sys.exit(f"Network weights {config.network_path} not found: run scripts/download_weights.sh, "
-                     f"or pass --network_path")
+            sys.exit(
+                f"Network weights {config.network_path} not found: run scripts/download_weights.sh, "
+                f"or pass --network_path"
+            )
         chess_net.load_network(config.network_path)
     chess_net.share_memory()
 
@@ -155,8 +158,14 @@ def main():
     print(f"Run folder: {folder_name}")
 
     # Save useful daa with weights and biases (offline: no account or API key needed)
-    wandb.init(project="ZeroStyleChessBot", name=folder_name, config=vars(config), save_code=True, dir=folder_name,
-               mode="offline")
+    wandb.init(
+        project="ZeroStyleChessBot",
+        name=folder_name,
+        config=vars(config),
+        save_code=True,
+        dir=folder_name,
+        mode="offline",
+    )
 
     sys.exit(run_pipeline(folder_name, chess_net, config))
 

@@ -5,7 +5,6 @@ from util.parallel_error_log import error_logger
 from neural_nets.conv_net import ChessNet
 from neural_nets.generic_net import GenericNet
 
-import chess_moves
 import contextlib
 from typing import List
 import numpy as np
@@ -16,14 +15,30 @@ import torch
 
 
 class TrainingProcess(Process):
-    """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
+    """This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
+
     min_games_to_train = 0
     idle_sleep_seconds = 0.01
 
-    def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, weights_queues: List[Queue] = None,
-                 batch_size: int = 1024, minibatch_size: int = 32, min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None, load_path: str = None,
-                 weights_update_freq: int = 100, expert_ratio: float = 0.9, expert_ratio_decay_rate: float = 0.995, update_period: int = 25,
-                 stop_event: Event = None, generated_data_dir: str = "neural_nets/generated_data"):
+    def __init__(
+        self,
+        save_dir: str,
+        neural_net: ChessNet,
+        experience_queues: List[Queue] = None,
+        weights_queues: List[Queue] = None,
+        batch_size: int = 1024,
+        minibatch_size: int = 32,
+        min_num_batches_to_train: int = 128,
+        num_agents: int = 1,
+        data_queue: Queue = None,
+        load_path: str = None,
+        weights_update_freq: int = 100,
+        expert_ratio: float = 0.9,
+        expert_ratio_decay_rate: float = 0.995,
+        update_period: int = 25,
+        stop_event: Event = None,
+        generated_data_dir: str = "neural_nets/generated_data",
+    ):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -47,7 +62,7 @@ class TrainingProcess(Process):
         self.batch_size: int = batch_size
         self.minibatch_size: int = minibatch_size
         self._batch_to_minibatch_ratio = self.batch_size // self.minibatch_size
-        self.min_num_batches_to_train: int  = min_num_batches_to_train
+        self.min_num_batches_to_train: int = min_num_batches_to_train
         self.update_period: int = update_period
         self.expert_ratio: float = expert_ratio
         self.expert_ratio_decay_rate: float = expert_ratio_decay_rate
@@ -56,8 +71,9 @@ class TrainingProcess(Process):
         self.neural_net: GenericNet = neural_net
 
         # Initialise the memory... this handles all the experiences
-        self.memory = Memory(1000000, num_agents=num_agents, expert_data_path=load_path,
-                             generated_data_dir=generated_data_dir)
+        self.memory = Memory(
+            1000000, num_agents=num_agents, expert_data_path=load_path, generated_data_dir=generated_data_dir
+        )
 
         #  Set up loss plotting windows
         self.value_loss_window = np.zeros(self.update_period)
@@ -86,39 +102,42 @@ class TrainingProcess(Process):
         :return:
         """
 
-        stream_context = torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() \
-            else contextlib.nullcontext()
+        stream_context = (
+            torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else contextlib.nullcontext()
+        )
 
         while not self.stop_event.is_set():
-
             if not self.collect_experience(stream_context):
                 time.sleep(self.idle_sleep_seconds)
 
             time_now = time.time()
             if time_now - self.last_update_time > self.update_period and self.data_queue is not None:
-
-                new_data = {'experience_length': len(self.memory.data),
-                            'total_loss': self.total_loss_window.mean(),
-                            'value_loss': self.value_loss_window.mean(),
-                            'policy_loss': self.pol_loss_window.mean()}
+                new_data = {
+                    "experience_length": len(self.memory.data),
+                    "total_loss": self.total_loss_window.mean(),
+                    "value_loss": self.value_loss_window.mean(),
+                    "policy_loss": self.pol_loss_window.mean(),
+                }
 
                 self.data_queue.put_nowait(new_data)
                 self.last_update_time = time_now
 
-                with open(self.save_dir+'/debug.txt', 'w') as f:
+                with open(self.save_dir + "/debug.txt", "w") as f:
                     now = datetime.now()
-                    f.write(f'Still alive at time: {now.strftime("%m/%d/%Y, %H:%M:%S")}\n')
-                    f.write(f'experience_length: {len(self.memory.data):.5f} total_loss: {self.total_loss_window.mean():.5f}\n'
-                            f'value_loss: {self.value_loss_window.mean():.5f} policy_loss: {self.pol_loss_window.mean():.5f}\n'
-                            f'Games played: {self.games_played}')
+                    f.write(f"Still alive at time: {now.strftime('%m/%d/%Y, %H:%M:%S')}\n")
+                    f.write(
+                        f"experience_length: {len(self.memory.data):.5f} total_loss: {self.total_loss_window.mean():.5f}\n"
+                        f"value_loss: {self.value_loss_window.mean():.5f} policy_loss: {self.pol_loss_window.mean():.5f}\n"
+                        f"Games played: {self.games_played}"
+                    )
 
             if time_now - self.last_network_save > 600 and self.data_queue is not None:
-                self.neural_net.save_network(f'{self.save_dir}/RL_tuned_{self.training_count}.pt')
+                self.neural_net.save_network(f"{self.save_dir}/RL_tuned_{self.training_count}.pt")
                 self.last_network_save = time.time()
                 self.memory.save_data()
 
         # Final checkpoint so a clean shutdown never loses training progress
-        self.neural_net.save_network(f'{self.save_dir}/RL_tuned_{self.training_count}.pt')
+        self.neural_net.save_network(f"{self.save_dir}/RL_tuned_{self.training_count}.pt")
         self.memory.save_data()
 
         # Don't block exit flushing queues whose readers have already stopped
@@ -133,7 +152,6 @@ class TrainingProcess(Process):
         """
         received = False
         for queue in self.experience_queue:
-
             for _ in range(self.batch_size):
                 try:
                     game_states, agent_id = queue.get_nowait()
@@ -152,7 +170,7 @@ class TrainingProcess(Process):
         return received
 
     def train_neural_network(self):
-        """ Train the neural network using the experiences from the memory """
+        """Train the neural network using the experiences from the memory"""
 
         if len(self.memory) < self.min_num_batches_to_train * self.batch_size:
             return
@@ -163,8 +181,9 @@ class TrainingProcess(Process):
         # Do a minibatch of gradient calculation
         states, moves, probs, wins = self.memory.get_batch(self.batch_size, self.expert_ratio)
         state, moves, wins, legal_move_mask = self.neural_net.tensorise_batch(states, moves, probs, wins)
-        total_loss, value_loss, pol_loss = self.neural_net.loss_function(state, target=(wins, moves),
-                                                                         legal_move_mask=legal_move_mask)
+        total_loss, value_loss, pol_loss = self.neural_net.loss_function(
+            state, target=(wins, moves), legal_move_mask=legal_move_mask
+        )
         # Compute the gradients
         total_loss.backward()
 
@@ -187,14 +206,14 @@ class TrainingProcess(Process):
             self.send_weights_update()
 
     def send_weights_update(self):
-        weights = {k: v.cpu() for k,v in self.neural_net.state_dict().items()}
+        weights = {k: v.cpu() for k, v in self.neural_net.state_dict().items()}
         for queue in self.weights_queues:
             try:
                 queue.put_nowait(weights)
             except Full:
                 # The evaluator hasn't taken the previous update yet: replace it with this newer one
                 try:
-                    queue.get(timeout=1.)
+                    queue.get(timeout=1.0)
                 except Empty:
                     pass  # the evaluator took it in the meantime
                 queue.put_nowait(weights)

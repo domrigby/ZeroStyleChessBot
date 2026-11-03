@@ -22,8 +22,8 @@ pytestmark = pytest.mark.integration
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = REPO_ROOT / "tests" / "integration" / "tiny_pipeline.py"
 NUM_PIPELINE_CHILDREN = NUM_AGENTS + NUM_EVALUATORS + NUM_TRAINERS
-STARTUP_TIMEOUT_SECONDS = 60.
-EXIT_GRACE_SECONDS = 15.
+STARTUP_TIMEOUT_SECONDS = 60.0
+EXIT_GRACE_SECONDS = 15.0
 
 
 def _descendants(process: subprocess.Popen) -> List[psutil.Process]:
@@ -55,8 +55,13 @@ def launch_pipeline(tmp_path: Path) -> Iterator[Callable[..., subprocess.Popen]]
     def launch(*extra_args: str) -> subprocess.Popen:
         environment = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
         with open(tmp_path / "pipeline_output.txt", "w") as output:
-            process = subprocess.Popen([sys.executable, str(LAUNCHER), "--run_dir", str(tmp_path), *extra_args],
-                                       cwd=tmp_path, env=environment, stdout=output, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(
+                [sys.executable, str(LAUNCHER), "--run_dir", str(tmp_path), *extra_args],
+                cwd=tmp_path,
+                env=environment,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
         launched.append(process)
         return process
 
@@ -71,7 +76,7 @@ def launch_pipeline(tmp_path: Path) -> Iterator[Callable[..., subprocess.Popen]]
 
 
 def test_sigint_stops_all_children_and_saves_checkpoint(launch_pipeline, tmp_path: Path) -> None:
-    run_seconds = 20.
+    run_seconds = 20.0
     process = launch_pipeline()
     descendants = _wait_for_children(process)
 
@@ -95,9 +100,9 @@ def test_injected_trainer_fault_shuts_down_with_non_zero_exit(launch_pipeline, t
 
 @pytest.mark.slow
 def test_resident_memory_stays_bounded_over_two_minutes(launch_pipeline) -> None:
-    run_seconds = 120.
-    warmup_seconds = 30.
-    sample_period_seconds = 5.
+    run_seconds = 120.0
+    warmup_seconds = 30.0
+    sample_period_seconds = 5.0
     allowed_growth_factor = 1.25
 
     process = launch_pipeline()

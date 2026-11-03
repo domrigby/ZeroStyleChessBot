@@ -3,16 +3,18 @@ import numpy as np
 from enum import Enum
 import pickle as pkl
 from datetime import datetime
-import glob, os
+import glob
+import os
 import warnings
 
+
 class Turn(Enum):
-    BLACK = 'black'
-    WHITE ='white'
+    BLACK = "black"
+    WHITE = "white"
 
 
 class DataPoint:
-    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.):
+    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.0):
         self.state: str = state
         self.moves: List[str] = moves
         self.probs: List[float] = probs
@@ -21,9 +23,13 @@ class DataPoint:
 
 
 class Memory:
-
-    def __init__(self, length_buffer, expert_data_path: str = None, num_agents: int = 1,
-                 generated_data_dir: str = "neural_nets/generated_data"):
+    def __init__(
+        self,
+        length_buffer,
+        expert_data_path: str = None,
+        num_agents: int = 1,
+        generated_data_dir: str = "neural_nets/generated_data",
+    ):
 
         # Save the states. A ring buffer: once full, self.index is the oldest entry, overwritten next
         self.data: List[DataPoint] = []
@@ -59,7 +65,7 @@ class Memory:
         return len(self.data)
 
     def add_data_point(self, data_point: DataPoint):
-        """ Add to the buffer, overwriting the oldest data point once it holds max_len """
+        """Add to the buffer, overwriting the oldest data point once it holds max_len"""
         if len(self.data) < self.max_len:
             self.data.append(data_point)
         else:
@@ -79,12 +85,11 @@ class Memory:
         entropy_of_batch: np.array = np.zeros(len(game))
 
         for idx, game_state in enumerate(game):
-
             # Extract the states
-            state = game_state['state']
-            observed_moves = game_state['moves']
-            visits = game_state['visit_counts']
-            value = game_state['value']
+            state = game_state["state"]
+            observed_moves = game_state["moves"]
+            visits = game_state["visit_counts"]
+            value = game_state["value"]
 
             moves: List[str] = []
             probs: List[float] = []
@@ -92,7 +97,7 @@ class Memory:
             total = np.sum(visits)
             for move, count in zip(observed_moves, visits):
                 moves.append(move)
-                probs.append(count/total)
+                probs.append(count / total)
 
             np_probs = np.array(probs)
             entropy = -np.sum(np_probs * np.log(np_probs, where=(np_probs > 0), out=np.zeros_like(np_probs)))
@@ -107,13 +112,14 @@ class Memory:
         # Reason for max adding... so that max entropy is only maximum 10 times more likely than the lowest possible moves
         print(f"Entropy = {entropy_of_batch}")
         entropy_of_batch += 0.1 * entropy_of_batch.max()
-        chosen_moves = np.random.choice(game_moves, size=min(2, len(game_moves)),
-                                        p=entropy_of_batch/entropy_of_batch.sum(), replace=False)
+        chosen_moves = np.random.choice(
+            game_moves, size=min(2, len(game_moves)), p=entropy_of_batch / entropy_of_batch.sum(), replace=False
+        )
         for data_point in chosen_moves:
             self.add_data_point(data_point)
             self.unsaved_data.append(data_point)
 
-    def get_batch(self, batch_size: int = 32, expert_ratio: float = 1.):
+    def get_batch(self, batch_size: int = 32, expert_ratio: float = 1.0):
         """
         Mixes real and generate data to prevent overfitting to the new data
         """
@@ -138,7 +144,6 @@ class Memory:
             wins.extend(new_batch[3])
 
         return states, moves, probs, wins
-
 
     def get_real_data_batch(self, batch_size: int = 32):
         """
@@ -169,7 +174,7 @@ class Memory:
         for file in files:
             if num_loaded >= self.max_len:
                 break
-            with open(file, 'rb') as f:
+            with open(file, "rb") as f:
                 moves = pkl.load(f)
             newest_first.append(moves)
             num_loaded += len(moves)
@@ -186,7 +191,7 @@ class Memory:
             file_path = os.path.join(self.generated_data_dir, f"{time_string}_len_{len(self.unsaved_data)}.pkl")
         if os.path.dirname(file_path):
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, 'wb') as f:
+        with open(file_path, "wb") as f:
             pkl.dump(self.unsaved_data, f)
         self.unsaved_data = []
 
@@ -201,7 +206,7 @@ class Memory:
         files = glob.glob(os.path.join(path, "*" + file_format))
         num_collected = 0
         for file in files:
-            with open(file, 'rb') as f:
+            with open(file, "rb") as f:
                 moves = pkl.load(f)
                 self.expert_data.extend(moves)
                 num_collected += len(moves)
@@ -218,9 +223,9 @@ class Memory:
 
         batch_data = [self.expert_data[idx] for idx in idxs]
 
-        states = [turn['fen'] for turn in batch_data]
-        moves = [[turn['moves']] for turn in batch_data]
-        probs = [[1.] for turn in batch_data] # Expert data only has one move
-        wins = [turn['value'] for turn in batch_data]
+        states = [turn["fen"] for turn in batch_data]
+        moves = [[turn["moves"]] for turn in batch_data]
+        probs = [[1.0] for turn in batch_data]  # Expert data only has one move
+        wins = [turn["value"] for turn in batch_data]
 
         return states, moves, probs, wins

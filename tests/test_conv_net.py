@@ -41,31 +41,36 @@ def test_illegal_moves_get_no_probability(chess_net: ChessNet, fen: str) -> None
     with torch.no_grad():
         _, policy = chess_net(state, legal_move_mask, infering=True)
 
-    assert policy[legal_move_mask == 0].max().item() == 0.
-    assert policy[legal_move_mask == 1].sum().item() == pytest.approx(1.)
+    assert policy[legal_move_mask == 0].max().item() == 0.0
+    assert policy[legal_move_mask == 1].sum().item() == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize("fen", POSITIONS)
 def test_every_legal_move_target_lies_inside_the_legal_move_mask(chess_net: ChessNet, fen: str) -> None:
     moves = _legal_moves(fen)
-    uniform_visits = [1. / len(moves)] * len(moves)
+    uniform_visits = [1.0 / len(moves)] * len(moves)
 
-    _, target_policy, _, legal_move_mask = chess_net.tensorise_batch([fen], [moves], [uniform_visits], [0.])
+    _, target_policy, _, legal_move_mask = chess_net.tensorise_batch([fen], [moves], [uniform_visits], [0.0])
 
-    assert (target_policy * (1 - legal_move_mask)).sum().item() == 0.
+    assert (target_policy * (1 - legal_move_mask)).sum().item() == 0.0
 
 
 def test_masked_training_loss_is_finite(chess_net: ChessNet) -> None:
     fens = [WHITE_FEN, BLACK_FEN, WHITE_PROMOTION_FEN, BLACK_PROMOTION_FEN]
     moves = [_legal_moves(fen) for fen in fens]
-    visit_distributions = [[1. / len(move_set)] * len(move_set) for move_set in moves]
+    visit_distributions = [[1.0 / len(move_set)] * len(move_set) for move_set in moves]
     state, target_policy, target_value, legal_move_mask = chess_net.tensorise_batch(
-        fens, moves, visit_distributions, [0.] * len(fens))
+        fens, moves, visit_distributions, [0.0] * len(fens)
+    )
 
-    total_loss, value_loss, policy_loss = chess_net.loss_function(state, target=(target_value, target_policy),
-                                                                  legal_move_mask=legal_move_mask)
+    total_loss, value_loss, policy_loss = chess_net.loss_function(
+        state, target=(target_value, target_policy), legal_move_mask=legal_move_mask
+    )
     total_loss.backward()
 
     assert all(torch.isfinite(loss).item() for loss in (total_loss, value_loss, policy_loss))
-    assert all(torch.isfinite(parameter.grad).all().item() for parameter in chess_net.parameters()
-               if parameter.grad is not None)
+    assert all(
+        torch.isfinite(parameter.grad).all().item()
+        for parameter in chess_net.parameters()
+        if parameter.grad is not None
+    )

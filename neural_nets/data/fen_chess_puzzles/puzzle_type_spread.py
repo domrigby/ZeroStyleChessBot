@@ -13,21 +13,21 @@ def main():
     df = pd.read_csv(args.csv_path)
 
     # Split themes by row and flatten
-    theme_lists = df['Themes'].dropna().str.split()
+    theme_lists = df["Themes"].dropna().str.split()
     all_themes = [theme for sublist in theme_lists for theme in sublist]
 
     # Count occurrences
     theme_counts = Counter(all_themes)
 
     # Convert to DataFrame for plotting
-    theme_df = pd.DataFrame(theme_counts.items(), columns=['Theme', 'Count']).sort_values('Count', ascending=False)
+    theme_df = pd.DataFrame(theme_counts.items(), columns=["Theme", "Count"]).sort_values("Count", ascending=False)
 
     # Plot
     plt.figure(figsize=(10, 6))
-    plt.bar(theme_df['Theme'], theme_df['Count'])
-    plt.xticks(rotation=45, ha='right')
-    plt.ylabel('Number of Positions')
-    plt.title('Distribution of Themes in Dataset')
+    plt.bar(theme_df["Theme"], theme_df["Count"])
+    plt.xticks(rotation=45, ha="right")
+    plt.ylabel("Number of Positions")
+    plt.title("Distribution of Themes in Dataset")
     plt.tight_layout()
     plt.show()
 

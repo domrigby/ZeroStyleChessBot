@@ -21,14 +21,20 @@ def make_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def make(weights_queues: List[queue.Queue], weights_update_freq: int) -> TrainingProcess:
         chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=str(tmp_path))
-        trainer = TrainingProcess(save_dir=str(tmp_path), neural_net=chess_net, weights_queues=weights_queues,
-                                  batch_size=BATCH_SIZE, minibatch_size=BATCH_SIZE, min_num_batches_to_train=1,
-                                  weights_update_freq=weights_update_freq)
+        trainer = TrainingProcess(
+            save_dir=str(tmp_path),
+            neural_net=chess_net,
+            weights_queues=weights_queues,
+            batch_size=BATCH_SIZE,
+            minibatch_size=BATCH_SIZE,
+            min_num_batches_to_train=1,
+            weights_update_freq=weights_update_freq,
+        )
         engine = chess_moves.ChessEngine()
         engine.set_fen(START_FEN)
         moves = engine.legal_moves()
         for _ in range(BATCH_SIZE):
-            trainer.memory.add_data_point(DataPoint(START_FEN, moves, [1. / len(moves)] * len(moves)))
+            trainer.memory.add_data_point(DataPoint(START_FEN, moves, [1.0 / len(moves)] * len(moves)))
         return trainer
 
     return make
@@ -43,13 +49,17 @@ def _drain(weights_queue: queue.Queue) -> list:
             return received
 
 
-@pytest.mark.parametrize("steps, weights_update_freq", [
-    pytest.param(7, 3, id="not_a_multiple"),
-    pytest.param(6, 3, id="exact_multiple"),
-    pytest.param(2, 3, id="fewer_steps_than_freq"),
-])
-def test_every_evaluator_receives_exactly_one_update_per_freq_steps(make_trainer, steps: int,
-                                                                    weights_update_freq: int) -> None:
+@pytest.mark.parametrize(
+    "steps, weights_update_freq",
+    [
+        pytest.param(7, 3, id="not_a_multiple"),
+        pytest.param(6, 3, id="exact_multiple"),
+        pytest.param(2, 3, id="fewer_steps_than_freq"),
+    ],
+)
+def test_every_evaluator_receives_exactly_one_update_per_freq_steps(
+    make_trainer, steps: int, weights_update_freq: int
+) -> None:
     num_evaluators = 2
     weights_queues = [queue.Queue(maxsize=1) for _ in range(num_evaluators)]
     trainer = make_trainer(weights_queues, weights_update_freq)

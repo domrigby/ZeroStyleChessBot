@@ -64,7 +64,7 @@ class ChessEngineMonitor:
             "game_lengths": self.game_lengths,
             "loss_history": self.loss_history,
             "experience_length": self.experience_length,
-            "exploration_history": self.exploration_history
+            "exploration_history": self.exploration_history,
         }
         os.makedirs(os.path.dirname(self.save_file), exist_ok=True)
         with open(self.save_file, "w") as f:

@@ -18,12 +18,10 @@ def test_engine_start_position_has_twenty_legal_moves() -> None:
 
 def test_chess_net_forward_pass_on_start_position(tmp_path) -> None:
     batch_size = 1
-    chess_net = ChessNet(input_size=INPUT_SIZE, output_size=OUTPUT_SIZE, num_repeats=1,
-                         save_dir=str(tmp_path))
+    chess_net = ChessNet(input_size=INPUT_SIZE, output_size=OUTPUT_SIZE, num_repeats=1, save_dir=str(tmp_path))
     chess_net.eval()
 
-    board_tensor = torch.tensor(chess_moves.ChessEngine().fen_to_tensor(START_FEN),
-                                dtype=torch.float32).unsqueeze(0)
+    board_tensor = torch.tensor(chess_moves.ChessEngine().fen_to_tensor(START_FEN), dtype=torch.float32).unsqueeze(0)
     assert list(board_tensor.shape) == [batch_size, *INPUT_SIZE]
 
     with torch.no_grad():

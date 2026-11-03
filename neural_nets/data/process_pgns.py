@@ -6,11 +6,12 @@ import glob
 import os
 import pickle
 
+
 class WinTypes(Enum):
     TIME = "time"
 
-class PGNLoader:
 
+class PGNLoader:
     def __init__(self, pgn_dir: str, rejected_win_types: List[WinTypes] = None):
 
         if rejected_win_types is None:
@@ -30,10 +31,9 @@ class PGNLoader:
         """
         Load game data from a PGN file.
         """
-        with open(pgn_path, 'r') as pgn_file:
+        with open(pgn_path, "r") as pgn_file:
             print(f"Loading {pgn_path}")
             while True:
-
                 game = chess.pgn.read_game(pgn_file)
                 if game is None:
                     break
@@ -70,14 +70,12 @@ class PGNLoader:
             return
 
         for idx, move in enumerate(moves):
-
             fen = board.fen()
 
             if not os.path.exists(self.pgn_dir + f"/pickles/{idx}"):
                 os.makedirs(self.pgn_dir + f"/pickles/{idx}")
 
             try:
-
                 move = board.parse_san(move)
 
                 # Get legal moves for the current FEN state
@@ -91,13 +89,20 @@ class PGNLoader:
                     continue
 
                 with open(self.pgn_dir + f"/pickles/{idx}/game_{self.game_count}.pkl", "wb") as f:
-                    move_dict = {'fen': fen, 'move': str(move), 'legal_moves': legal_moves, 'winner': winner, 'turn_num': idx}
+                    move_dict = {
+                        "fen": fen,
+                        "move": str(move),
+                        "legal_moves": legal_moves,
+                        "winner": winner,
+                        "turn_num": idx,
+                    }
                     pickle.dump(move_dict, f)
 
             except Exception as e:
                 # Skip invalid moves
                 print(f"Invalid move: {move} due to {e}")
                 break
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert PGN files into pickled moves.")

@@ -1,4 +1,5 @@
 """Checks migrated from cpp_chess_env/debug_scripts: move legality, promotions and the move <-> index mapping."""
+
 import random
 from typing import List
 
@@ -20,12 +21,15 @@ def _legal_moves(fen: str) -> List[str]:
     return engine.legal_moves()
 
 
-@pytest.mark.parametrize("fen, expected_moves", [
-    pytest.param(START_FEN, ["e2e4", "b1c3"], id="start_position"),
-    pytest.param("k7/8/3p4/4P3/8/8/8/K7 w - - 0 1", ["e5e6", "e5d6"], id="white_pawn_push_and_capture"),
-    pytest.param("3k4/8/8/8/1B1r4/8/8/3K4 w - - 0 1", ["b4d2"], id="block_check"),
-    pytest.param("3k4/8/8/1B6/8/8/8/3K1r2 w - - 0 1", ["b5f1"], id="capture_checking_piece"),
-])
+@pytest.mark.parametrize(
+    "fen, expected_moves",
+    [
+        pytest.param(START_FEN, ["e2e4", "b1c3"], id="start_position"),
+        pytest.param("k7/8/3p4/4P3/8/8/8/K7 w - - 0 1", ["e5e6", "e5d6"], id="white_pawn_push_and_capture"),
+        pytest.param("3k4/8/8/8/1B1r4/8/8/3K4 w - - 0 1", ["b4d2"], id="block_check"),
+        pytest.param("3k4/8/8/1B6/8/8/8/3K1r2 w - - 0 1", ["b5f1"], id="capture_checking_piece"),
+    ],
+)
 def test_expected_moves_are_legal(fen: str, expected_moves: List[str]) -> None:
     legal_moves = _legal_moves(fen)
 
@@ -77,8 +81,9 @@ def test_promotion_push_places_promoted_piece() -> None:
     assert new_fen.split()[0].startswith("Q7/8")
 
 
-@pytest.mark.parametrize("piece_idx, piece", [pytest.param(idx, piece, id=piece)
-                                               for idx, piece in enumerate(PROMOTION_PIECES)])
+@pytest.mark.parametrize(
+    "piece_idx, piece", [pytest.param(idx, piece, id=piece) for idx, piece in enumerate(PROMOTION_PIECES)]
+)
 def test_promotion_maps_to_its_own_channel(piece_idx: int, piece: str) -> None:
     engine = chess_moves.ChessEngine()
 
@@ -87,10 +92,13 @@ def test_promotion_maps_to_its_own_channel(piece_idx: int, piece: str) -> None:
     assert channel == FIRST_PROMOTION_CHANNEL + piece_idx
 
 
-@pytest.mark.parametrize("fen", [
-    pytest.param(START_FEN, id="start_position"),
-    pytest.param(ITALIAN_FEN, id="italian_game"),
-])
+@pytest.mark.parametrize(
+    "fen",
+    [
+        pytest.param(START_FEN, id="start_position"),
+        pytest.param(ITALIAN_FEN, id="italian_game"),
+    ],
+)
 def test_move_index_round_trip(fen: str) -> None:
     engine = chess_moves.ChessEngine()
 

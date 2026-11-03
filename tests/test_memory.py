@@ -48,10 +48,13 @@ def test_pickled_data_point_has_no_back_reference_to_its_game(empty_memory_direc
         assert len(pickle.dumps(data_point)) < 2 * len(pickle.dumps(standalone))
 
 
-@pytest.mark.parametrize("max_len, num_games", [
-    pytest.param(5, 10, id="overfilled"),
-    pytest.param(1, 3, id="single_slot"),
-])
+@pytest.mark.parametrize(
+    "max_len, num_games",
+    [
+        pytest.param(5, 10, id="overfilled"),
+        pytest.param(1, 3, id="single_slot"),
+    ],
+)
 def test_buffer_never_exceeds_max_len(empty_memory_directory: Path, max_len: int, num_games: int) -> None:
     game_length = 6
     memory = Memory(length_buffer=max_len)

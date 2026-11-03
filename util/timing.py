@@ -1,7 +1,7 @@
 import time
 
-class TicToc:
 
+class TicToc:
     @classmethod
     def tic(cls):
         cls.start_time = time.perf_counter_ns()

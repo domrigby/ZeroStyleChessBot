@@ -3,15 +3,18 @@ import os
 import pickle
 import random
 
-MAX_SIZE = 250_000                   # Max entries per file
+MAX_SIZE = 250_000  # Max entries per file
+
 
 def load_pickle(file_path):
     with open(file_path, "rb") as f:
         return pickle.load(f)
 
+
 def save_pickle(data, file_path):
     with open(file_path, "wb") as f:
         pickle.dump(data, f)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Shuffle test_moves_*.pkl files into new chunks.")
@@ -27,13 +30,9 @@ def main():
     buffer = []
     file_counter = 0
 
-    input_files = sorted([
-        f for f in os.listdir(SOURCE_DIR)
-        if f.startswith("test_moves_") and f.endswith(".pkl")
-    ])
+    input_files = sorted([f for f in os.listdir(SOURCE_DIR) if f.startswith("test_moves_") and f.endswith(".pkl")])
 
     for fname in input_files:
-
         print(f"Reading file: {fname}")
         data = load_pickle(os.path.join(SOURCE_DIR, fname))
         buffer.extend(data)
@@ -56,6 +55,7 @@ def main():
         out_fname = f"test_moves_{file_counter}.pkl"
         save_pickle(buffer, os.path.join(DEST_DIR, out_fname))
         print(f"Saved {out_fname} with {len(buffer)} items.")
+
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,8 @@
 import argparse
-import pandas as pd
-import random
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 import torch
 import numpy as np
-import chess.pgn
 import chess_moves
-import pickle
 import pickle as pkl
 import glob
 import os
@@ -18,9 +14,14 @@ from neural_nets.conv_net import ChessNet
 
 
 class ChessDataset(Dataset):
-
-    def __init__(self, moves_dir: str, accepted_win_types: List[str] = None, rejected_win_types: List[str] = None,
-                 sample_size: int = 2500000, random_sample: bool = True):
+    def __init__(
+        self,
+        moves_dir: str,
+        accepted_win_types: List[str] = None,
+        rejected_win_types: List[str] = None,
+        sample_size: int = 2500000,
+        random_sample: bool = True,
+    ):
         """
         Initialize the dataset with data from multiple CSV and PGN files.
         """
@@ -34,7 +35,7 @@ class ChessDataset(Dataset):
         self.accepted_win_types = accepted_win_types
         self.rejected_win_types = rejected_win_types
 
-        self.move_dirs = glob.glob(moves_dir + '/*')
+        self.move_dirs = glob.glob(moves_dir + "/*")
         self.all_moves: List[str] = []  # List of all pickle files containing precomputed FEN states and moves
 
         if random_sample:
@@ -45,7 +46,7 @@ class ChessDataset(Dataset):
         self.chunk_count = 0
 
     def sample_dataset(self):
-        with open(self.dataset_path, 'rb') as f:
+        with open(self.dataset_path, "rb") as f:
             pickle_moves = pkl.load(f)
             this_sample_size = min(len(pickle_moves), self.sample_size)
             self.all_moves = np.random.choice(pickle_moves, this_sample_size, replace=False)
@@ -55,7 +56,7 @@ class ChessDataset(Dataset):
         lb = self.chunk_count * self.sample_size
         ub = (self.chunk_count + 1) * self.sample_size
 
-        with open(self.dataset_path, 'rb') as f:
+        with open(self.dataset_path, "rb") as f:
             pickle_moves = pkl.load(f)
             ub = min(ub, len(pickle_moves))
             self.all_moves = pickle_moves[lb:ub]
@@ -72,13 +73,13 @@ class ChessDataset(Dataset):
         """
         data = self.all_moves[idx]
 
-        fen = data['fen']
-        move = data['moves']
+        fen = data["fen"]
+        move = data["moves"]
 
         # Determine the result for the player
-        player = "white" if fen.split()[1] == 'w' else "black"
+        player = "white" if fen.split()[1] == "w" else "black"
 
-        value = data['value']
+        value = data["value"]
 
         # Convert FEN state and move to tensors
         board_tensor = self.chess_engine.fen_to_tensor(fen)
@@ -107,12 +108,7 @@ class ChessDataset(Dataset):
         #     #                    f"\n\t\tLegal moves = {[move for move, _ in leg_move_lookup]}")
         #     return self.__getitem__(np.random.choice(len(self)))
 
-        return {
-            'state': board_tensor,
-            'move': move_tensor,
-            'player': player,
-            'value': value
-        }
+        return {"state": board_tensor, "move": move_tensor, "player": player, "value": value}
 
     def create_legal_move_mask(self, moves, team):
         move_to_indices_lookup = []
@@ -142,13 +138,13 @@ class ChessDataset(Dataset):
         return legal_move_mask, move_to_indices_lookup
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Parse arguments for resuming training from a checkpoint
     parser = argparse.ArgumentParser(description="Train ChessNet with checkpointing.")
-    parser.add_argument("--checkpoint", type=str, default=None,
-                        help="Path to checkpoint file to resume training.")
-    parser.add_argument("--data_dir", type=str, required=True,
-                        help="Directory containing train*pkl and test*pkl files.")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint file to resume training.")
+    parser.add_argument(
+        "--data_dir", type=str, required=True, help="Directory containing train*pkl and test*pkl files."
+    )
     args = parser.parse_args()
 
     # Parameters
@@ -178,12 +174,12 @@ if __name__ == '__main__':
     epoch_val_epochs = []
 
     # Lines for rolling averages (training)
-    rolling_avg_total_line, = ax1.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Total Loss)")
-    rolling_avg_value_line, = ax2.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Value Loss)")
-    rolling_avg_policy_line, = ax3.plot([], [], linestyle='--', label="100-Batch Rolling Avg (Policy Loss)")
+    (rolling_avg_total_line,) = ax1.plot([], [], linestyle="--", label="100-Batch Rolling Avg (Total Loss)")
+    (rolling_avg_value_line,) = ax2.plot([], [], linestyle="--", label="100-Batch Rolling Avg (Value Loss)")
+    (rolling_avg_policy_line,) = ax3.plot([], [], linestyle="--", label="100-Batch Rolling Avg (Policy Loss)")
 
     # Line for validation loss
-    val_loss_line, = ax4.plot([], [], linestyle='-', label="Validation Loss")
+    (val_loss_line,) = ax4.plot([], [], linestyle="-", label="Validation Loss")
 
     # Configure the plots
     ax1.set_title("Total Loss")
@@ -208,8 +204,8 @@ if __name__ == '__main__':
     ax4.legend()
 
     # Training parameters
-    best_val_loss = float('inf')
-    best_rolling_avg = float('inf')
+    best_val_loss = float("inf")
+    best_rolling_avg = float("inf")
     rolling_window = 100
     batch_counter = 0
 
@@ -217,19 +213,19 @@ if __name__ == '__main__':
     starting_epoch = 0
     if args.checkpoint:
         checkpoint = torch.load(args.checkpoint)
-        starting_epoch = checkpoint['epoch'] + 1
-        batch_counter = checkpoint['batch_counter']
-        chess_net.load_state_dict(checkpoint['model_state_dict'])
+        starting_epoch = checkpoint["epoch"] + 1
+        batch_counter = checkpoint["batch_counter"]
+        chess_net.load_state_dict(checkpoint["model_state_dict"])
         # chess_net.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        loss_values = checkpoint['loss_values']
-        value_loss_values = checkpoint['value_loss_values']
-        policy_loss_values = checkpoint['policy_loss_values']
-        rolling_avg_values = checkpoint['rolling_avg_values']
-        rolling_avg_value = checkpoint['rolling_avg_value']
-        rolling_avg_policy = checkpoint['rolling_avg_policy']
-        rolling_avg_epochs = checkpoint['rolling_avg_epochs']
-        best_val_loss = checkpoint['best_val_loss']
-        best_rolling_avg = checkpoint['best_rolling_avg']
+        loss_values = checkpoint["loss_values"]
+        value_loss_values = checkpoint["value_loss_values"]
+        policy_loss_values = checkpoint["policy_loss_values"]
+        rolling_avg_values = checkpoint["rolling_avg_values"]
+        rolling_avg_value = checkpoint["rolling_avg_value"]
+        rolling_avg_policy = checkpoint["rolling_avg_policy"]
+        rolling_avg_epochs = checkpoint["rolling_avg_epochs"]
+        best_val_loss = checkpoint["best_val_loss"]
+        best_rolling_avg = checkpoint["best_rolling_avg"]
         print(f"Resumed training from checkpoint: {args.checkpoint} at epoch {starting_epoch}")
 
     # Record start time for elapsed time reporting and checkpointing
@@ -239,14 +235,12 @@ if __name__ == '__main__':
     train_files = glob.glob(os.path.join(args.data_dir, "train*pkl"))
     test_files = glob.glob(os.path.join(args.data_dir, "test*pkl"))
 
-
     # Define the test data set size (these are completely unseen games)
     test_dataset = ChessDataset(moves_dir=np.random.choice(test_files), sample_size=100000)
     val_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     # Training loop
     for epoch in range(starting_epoch, 500000):
-
         # Build the datasets
         train_dataset = ChessDataset(moves_dir=np.random.choice(train_files), sample_size=250000)
 
@@ -256,14 +250,13 @@ if __name__ == '__main__':
         train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=5)
         chess_net.train()
         for batch in train_dataloader:
-            state_tensor = batch['state']
-            move_target_tensor = batch['move']
-            value_target = batch['value']
+            state_tensor = batch["state"]
+            move_target_tensor = batch["move"]
+            value_target = batch["value"]
 
             # Calculate loss
             loss, value_loss, policy_loss = chess_net.loss_function(
-                state_tensor,
-                (value_target.float(), move_target_tensor.float())
+                state_tensor, (value_target.float(), move_target_tensor.float())
             )
 
             # Update loss values for plotting
@@ -313,19 +306,19 @@ if __name__ == '__main__':
             # Checkpoint saving every 10 minutes (600 seconds)
             if time.time() - last_checkpoint_time >= 600:
                 checkpoint_dict = {
-                    'epoch': epoch,
-                    'batch_counter': batch_counter,
-                    'model_state_dict': chess_net.state_dict(),
-                    'scheduler_state_dict': chess_net.scheduler.state_dict(),
-                    'loss_values': loss_values,
-                    'value_loss_values': value_loss_values,
-                    'policy_loss_values': policy_loss_values,
-                    'rolling_avg_values': rolling_avg_values,
-                    'rolling_avg_value': rolling_avg_value,
-                    'rolling_avg_policy': rolling_avg_policy,
-                    'rolling_avg_epochs': rolling_avg_epochs,
-                    'best_val_loss': best_val_loss,
-                    'best_rolling_avg': best_rolling_avg,
+                    "epoch": epoch,
+                    "batch_counter": batch_counter,
+                    "model_state_dict": chess_net.state_dict(),
+                    "scheduler_state_dict": chess_net.scheduler.state_dict(),
+                    "loss_values": loss_values,
+                    "value_loss_values": value_loss_values,
+                    "policy_loss_values": policy_loss_values,
+                    "rolling_avg_values": rolling_avg_values,
+                    "rolling_avg_value": rolling_avg_value,
+                    "rolling_avg_policy": rolling_avg_policy,
+                    "rolling_avg_epochs": rolling_avg_epochs,
+                    "best_val_loss": best_val_loss,
+                    "best_rolling_avg": best_rolling_avg,
                 }
                 checkpoint_path = "training_checkpoint.pt"
                 torch.save(checkpoint_dict, checkpoint_path)
@@ -341,7 +334,8 @@ if __name__ == '__main__':
             minutes, seconds = divmod(rem, 60)  # Get minutes and remaining seconds
             print(
                 f"\rTime: {int(hours):02}:{int(minutes):02}:{int(seconds):02} - Epoch: {epoch} Batch: {batch_counter} LR: {current_lr:.3e}",
-                end="")
+                end="",
+            )
 
             # Update learning rate
             chess_net.scheduler.step()
@@ -352,17 +346,15 @@ if __name__ == '__main__':
         val_batches = 0
         with torch.no_grad():
             for batch in val_dataloader:
-                state_tensor = batch['state']
-                move_target_tensor = batch['move']
-                value_target = batch['value']
+                state_tensor = batch["state"]
+                move_target_tensor = batch["move"]
+                value_target = batch["value"]
                 loss, _, _ = chess_net.loss_function(
-                    state_tensor,
-                    (value_target.float(), move_target_tensor.float()),
-                    training=False
+                    state_tensor, (value_target.float(), move_target_tensor.float()), training=False
                 )
                 val_loss_total += loss.item()
                 val_batches += 1
-        avg_val_loss = val_loss_total / val_batches if val_batches > 0 else float('inf')
+        avg_val_loss = val_loss_total / val_batches if val_batches > 0 else float("inf")
         print(f"\nEpoch {epoch} validation loss: {avg_val_loss:.4f}")
 
         # Update validation loss tracking and plot

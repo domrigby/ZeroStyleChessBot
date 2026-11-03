@@ -4,10 +4,17 @@ import torch
 
 from typing import List
 
-class ChessNet(GenericNet):
 
-    def __init__(self, *args, num_filters: int = 64, num_repeats: int= 6, policy_loss_factor: float = 1.,
-                 value_loss_factor: float = .5, **kwargs):
+class ChessNet(GenericNet):
+    def __init__(
+        self,
+        *args,
+        num_filters: int = 64,
+        num_repeats: int = 6,
+        policy_loss_factor: float = 1.0,
+        value_loss_factor: float = 0.5,
+        **kwargs,
+    ):
 
         # Control convolution parameters
         self.num_filters = num_filters
@@ -34,21 +41,26 @@ class ChessNet(GenericNet):
 
         self.conv_blocks = nn.Sequential(*conv_block_repeats)
 
-        self.policy_head = nn.Sequential(ConvBlock(self.num_filters),
-                                         ConvBlock(self.num_filters),
-                                         ConvBlock(self.num_filters),
-                                         nn.Conv2d(self.num_filters, self.output_size[0], kernel_size=3, padding=1))
+        self.policy_head = nn.Sequential(
+            ConvBlock(self.num_filters),
+            ConvBlock(self.num_filters),
+            ConvBlock(self.num_filters),
+            nn.Conv2d(self.num_filters, self.output_size[0], kernel_size=3, padding=1),
+        )
 
-        self.value_head = nn.Sequential(ConvBlock(self.num_filters), ConvBlock(self.num_filters),
-                                     nn.Conv2d(self.num_filters, 4, kernel_size=3, padding=1),
-                                     nn.LeakyReLU(),
-                                     nn.Flatten(),
-                                     nn.Linear(4*64, 256),
-                                     nn.LeakyReLU(),
-                                     nn.Dropout(p=0.2),
-                                     nn.BatchNorm1d(256),
-                                     nn.Linear(256, 1),
-                                     nn.Tanh())
+        self.value_head = nn.Sequential(
+            ConvBlock(self.num_filters),
+            ConvBlock(self.num_filters),
+            nn.Conv2d(self.num_filters, 4, kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            nn.Flatten(),
+            nn.Linear(4 * 64, 256),
+            nn.LeakyReLU(),
+            nn.Dropout(p=0.2),
+            nn.BatchNorm1d(256),
+            nn.Linear(256, 1),
+            nn.Tanh(),
+        )
 
     @check_input
     def forward(self, x: torch.tensor, legal_move_mask: torch.tensor = None, infering: bool = False):
@@ -81,10 +93,15 @@ class ChessNet(GenericNet):
 
         return value, policy
 
-    def loss_function(self, input_tensor: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None, training: bool = True):
+    def loss_function(
+        self, input_tensor: torch.tensor, target: tuple, legal_move_mask: torch.tensor = None, training: bool = True
+    ):
 
         target_value, target_policy = target
-        target_value, target_policy = target_value.to(self.device, non_blocking=True), target_policy.to(self.device, non_blocking=True)
+        target_value, target_policy = (
+            target_value.to(self.device, non_blocking=True),
+            target_policy.to(self.device, non_blocking=True),
+        )
 
         # Predicted value
         predicted_value, predicted_policy = self(input_tensor, legal_move_mask)
@@ -99,6 +116,3 @@ class ChessNet(GenericNet):
         total_loss = self.val_beta * value_loss + self.pol_alpha * policy_loss
 
         return total_loss, value_loss, policy_loss
-
-
-

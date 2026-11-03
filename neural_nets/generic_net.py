@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from torch.optim import lr_scheduler
-import torch
 from functools import wraps
 import os
 
@@ -11,29 +10,34 @@ from typing import List
 import chess_moves
 import numpy as np
 
-from util.parallel_profiler import parallel_profile
 
 chess_engine = chess_moves.ChessEngine()
+
 
 def check_input(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # Ensure `self` has a `device` attribute
-        if not hasattr(self, 'device'):
-            raise AttributeError(f"{self.__class__.__name__} must have a 'device' attribute to use @ensure_device_method.")
+        if not hasattr(self, "device"):
+            raise AttributeError(
+                f"{self.__class__.__name__} must have a 'device' attribute to use @ensure_device_method."
+            )
 
         device = self.device
 
         # Move all tensor arguments to the correct device
         args = tuple(arg.to(device) if isinstance(arg, torch.Tensor) and arg.device != device else arg for arg in args)
-        kwargs = {k: v.to(device) if isinstance(v, torch.Tensor) and v.device != device else v for k, v in kwargs.items()}
+        kwargs = {
+            k: v.to(device) if isinstance(v, torch.Tensor) and v.device != device else v for k, v in kwargs.items()
+        }
 
         return func(self, *args, **kwargs)
+
     return wrapper
 
-class GenericNet(nn.Module):
 
-    def __init__(self, input_size: tuple, output_size: tuple, init_lr: float = 0.0001, save_dir: str = 'networks'):
+class GenericNet(nn.Module):
+    def __init__(self, input_size: tuple, output_size: tuple, init_lr: float = 0.0001, save_dir: str = "networks"):
 
         # Initialise nn Module
         super().__init__()
@@ -54,18 +58,19 @@ class GenericNet(nn.Module):
 
         # Initialize the scheduler
         # self.scheduler = lr_scheduler.StepLR(self.optimiser, step_size=1000, gamma=0.99)
-        self.scheduler = lr_scheduler.OneCycleLR(self.optimiser,
-            max_lr              = init_lr * 5,
-            total_steps         = int(1000e3),
-            pct_start           = 0.05,        # 5% of steps warming up
-            anneal_strategy     = 'cos',
-            div_factor          = 25,
-            final_div_factor    = 1e6)
+        self.scheduler = lr_scheduler.OneCycleLR(
+            self.optimiser,
+            max_lr=init_lr * 5,
+            total_steps=int(1000e3),
+            pct_start=0.05,  # 5% of steps warming up
+            anneal_strategy="cos",
+            div_factor=25,
+            final_div_factor=1e6,
+        )
 
         # Send to CUDA device
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.to(self.device)
-
 
     def _build_network(self):
         """
@@ -79,12 +84,12 @@ class GenericNet(nn.Module):
 
     def save_network(self, filename: str = None):
         if filename is None:
-            filename = os.path.join(self.save_dir, self.__class__.__name__) + '.pt'
+            filename = os.path.join(self.save_dir, self.__class__.__name__) + ".pt"
         torch.save(self.state_dict(), filename)
 
     def load_network(self, filename: str):
         if filename is None:
-            filename = os.path.join(self.save_dir, self.__class__.__name__) + '.pt'
+            filename = os.path.join(self.save_dir, self.__class__.__name__) + ".pt"
         self.load_state_dict(torch.load(filename))
 
     def create_legal_move_mask(self, moves, team: str = None):
@@ -114,7 +119,7 @@ class GenericNet(nn.Module):
                 c, r, k = idx_tensor[:, 0], idx_tensor[:, 1], idx_tensor[:, 2]
                 legal_move_mask[c, r, k] = 1.0  # set exactly those cells to 1
         else:
-            legal_move_mask = legal_move_mask + 1.
+            legal_move_mask = legal_move_mask + 1.0
 
         return legal_move_mask, move_to_indices_lookup
 
@@ -150,7 +155,7 @@ class GenericNet(nn.Module):
         index = 0
         for idx, (state, move_set, prob_set) in enumerate(zip(states, moves, probabilities)):
             # The board is seen from the player to move, so black's targets are flipped like its legal move mask
-            black_to_move = state.split()[1] == 'b'
+            black_to_move = state.split()[1] == "b"
             for move, prob in zip(move_set, prob_set):
                 move_str = chess_engine.unflip_move(str(move)) if black_to_move else str(move)
                 all_indices[index] = chess_engine.move_to_target_indices(move_str)  # Vectorized storage
@@ -192,7 +197,7 @@ class GenericNet(nn.Module):
             fen_tensors[i] = chess_engine.fen_to_tensor(state)
 
             # Determine player turn
-            player_turn = "white" if state.split()[1] == 'w' else "black"
+            player_turn = "white" if state.split()[1] == "w" else "black"
 
             # Generate legal move mask
             this_move_mask, key = self.create_legal_move_mask(move_set, player_turn)
@@ -207,7 +212,6 @@ class GenericNet(nn.Module):
 
 
 class ConvBlock(nn.Module):
-
     def __init__(self, in_channels: int, num_repeats: int = 2, activation_period: int = 2):
 
         super().__init__()
@@ -233,4 +237,3 @@ class ConvBlock(nn.Module):
         out = self.out_act(out)
 
         return out
-

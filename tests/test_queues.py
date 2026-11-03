@@ -20,7 +20,7 @@ def test_evaluators_do_not_share_parameters_with_the_trainer(tmp_path: Path, mon
     networks = [trainers[0].neural_net, *(evaluator.neural_net for evaluator in evaluators)]
     parameter_addresses = [{tensor.data_ptr() for tensor in network.state_dict().values()} for network in networks]
     for idx, addresses in enumerate(parameter_addresses):
-        for other in parameter_addresses[idx + 1:]:
+        for other in parameter_addresses[idx + 1 :]:
             assert addresses.isdisjoint(other)
 
     for evaluator in evaluators:

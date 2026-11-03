@@ -1,6 +1,7 @@
 import os
 import traceback
 
+
 def error_logger(func):
     """Decorator to log errors to a file defined in the class property, then re-raise them so the
     process exits with a non-zero exit code."""

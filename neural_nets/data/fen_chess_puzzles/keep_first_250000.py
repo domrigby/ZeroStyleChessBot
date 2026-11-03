@@ -4,7 +4,9 @@ import pickle
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Trim each train_moves_*.pkl in a directory to its first 250000 items, in place.")
+    parser = argparse.ArgumentParser(
+        description="Trim each train_moves_*.pkl in a directory to its first 250000 items, in place."
+    )
     parser.add_argument("input_dir", help="Directory containing train_moves_*.pkl files.")
     args = parser.parse_args()
 

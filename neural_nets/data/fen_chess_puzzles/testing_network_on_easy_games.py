@@ -16,7 +16,6 @@ def main():
 
     engine = chess_moves.ChessEngine()
 
-
     # Case 1 :
     fen = "4r3/1k6/pp3r2/1b2P2p/3R1p2/P1R2P2/1P4PP/6K1 w - - 0 35"
     input_tens = engine.fen_to_tensor(fen)

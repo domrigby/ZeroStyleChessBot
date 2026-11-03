@@ -5,15 +5,22 @@ from neural_nets.conv_net import ChessNet
 import contextlib
 import time
 import torch
-from util.parallel_profiler import parallel_profile
+
 
 class NeuralNetHandling(Process):
-    """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
+    """This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
 
     idle_sleep_seconds = 0.001
 
-    def __init__(self, neural_net: ChessNet, process_queues: List[Queue] = None, weights_queue: Queue = None,
-                 results_queue_dict: Dict[int, Queue] = None, batch_size: int = 64, stop_event: Event = None):
+    def __init__(
+        self,
+        neural_net: ChessNet,
+        process_queues: List[Queue] = None,
+        weights_queue: Queue = None,
+        results_queue_dict: Dict[int, Queue] = None,
+        batch_size: int = 64,
+        stop_event: Event = None,
+    ):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -37,13 +44,14 @@ class NeuralNetHandling(Process):
         self.processed_count = 0
 
     def run(self):
-        """ Optimized function to process queued game states efficiently. """
+        """Optimized function to process queued game states efficiently."""
 
         if self.results_queue is None:
             raise ValueError("NO RESULTS QUEUE: User must provide results queue from their game tree.")
 
-        stream_context = torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() \
-            else contextlib.nullcontext()
+        stream_context = (
+            torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else contextlib.nullcontext()
+        )
 
         while not self.stop_event.is_set():
             with stream_context:
@@ -61,7 +69,6 @@ class NeuralNetHandling(Process):
         per_queue_allowance = max(1, self.batch_size // len(self.process_queue))
 
         for queue in self.process_queue:
-
             for _ in range(per_queue_allowance):
                 try:
                     agent_id, the_hash, state, legal_moves_strings = queue.get_nowait()

@@ -21,13 +21,17 @@ def _optimal_line(root: Node, depth: int) -> Node:
     return node
 
 
-@pytest.mark.parametrize("positions_on_path, expected_saved", [
-    pytest.param(4, 4, id="even_keeps_all"),
-    pytest.param(5, 4, id="odd_drops_one"),
-    pytest.param(1, 0, id="single_position_drops_to_nothing"),
-])
-def test_save_path_whilst_optimal_keeps_an_even_number_of_positions(game_tree: GameTree, positions_on_path: int,
-                                                                    expected_saved: int) -> None:
+@pytest.mark.parametrize(
+    "positions_on_path, expected_saved",
+    [
+        pytest.param(4, 4, id="even_keeps_all"),
+        pytest.param(5, 4, id="odd_drops_one"),
+        pytest.param(1, 0, id="single_position_drops_to_nothing"),
+    ],
+)
+def test_save_path_whilst_optimal_keeps_an_even_number_of_positions(
+    game_tree: GameTree, positions_on_path: int, expected_saved: int
+) -> None:
     # Saved positions are the nodes strictly between the root and the end node
     end_node = _optimal_line(game_tree.root, depth=positions_on_path + 1)
 

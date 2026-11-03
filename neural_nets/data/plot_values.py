@@ -1,7 +1,6 @@
 import argparse
 import pickle
 import numpy as np
-import os
 import glob
 import matplotlib.pyplot as plt
 
@@ -18,8 +17,7 @@ def main():
     values = np.zeros(len(moves))
 
     for idx, move in enumerate(moves):
-
-        with open(move, 'rb') as f:
+        with open(move, "rb") as f:
             data = pickle.load(f)
 
         print(data)
@@ -28,12 +26,12 @@ def main():
         values[idx] = value
 
     # Create histogram
-    plt.hist(values, bins=30, color='blue', edgecolor='black', alpha=0.7)
+    plt.hist(values, bins=30, color="blue", edgecolor="black", alpha=0.7)
 
     # Add labels and title
-    plt.xlabel('Value')
-    plt.ylabel('Frequency')
-    plt.title('Histogram of Data')
+    plt.xlabel("Value")
+    plt.ylabel("Frequency")
+    plt.title("Histogram of Data")
 
     # Show plot
     plt.show()

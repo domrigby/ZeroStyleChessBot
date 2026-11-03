@@ -3,6 +3,7 @@
 Run as a script with the run directory as the working directory. The search budget and paths travel to the
 children inside the pickled process objects, via the TrainingConfig passed to create_agents.
 """
+
 import argparse
 import multiprocessing as mp
 import os
@@ -20,7 +21,7 @@ NUM_TRAINERS = 1
 FAULT_AFTER_ITERATIONS = 50
 TRAINING_BATCH_SIZE = 4
 WEIGHTS_UPDATE_FREQUENCY = 2
-SHUTDOWN_TIMEOUT_SECONDS = 30.
+SHUTDOWN_TIMEOUT_SECONDS = 30.0
 TINY_SEARCH_SIMULATIONS = 16
 
 
@@ -28,8 +29,11 @@ class TinyTrainer(TrainingProcess):
     """Trains on tiny batches so a short CPU run exercises training and weight pushes."""
 
     def __init__(self, *args, **kwargs) -> None:
-        kwargs.update(batch_size=TRAINING_BATCH_SIZE, minibatch_size=TRAINING_BATCH_SIZE,
-                      weights_update_freq=WEIGHTS_UPDATE_FREQUENCY)
+        kwargs.update(
+            batch_size=TRAINING_BATCH_SIZE,
+            minibatch_size=TRAINING_BATCH_SIZE,
+            weights_update_freq=WEIGHTS_UPDATE_FREQUENCY,
+        )
         super().__init__(*args, **kwargs)
 
 
@@ -57,9 +61,14 @@ def main() -> None:
     chess_net.share_memory()
 
     # A tiny search budget keeps moves fast on CPU; no curriculum or expert data, generated data kept in the run dir
-    config = TrainingConfig(num_agents=NUM_AGENTS, num_evaluators=NUM_EVALUATORS, num_trainers=NUM_TRAINERS,
-                            sims=TINY_SEARCH_SIMULATIONS, run_dir=args.run_dir,
-                            generated_data_dir=os.path.join(args.run_dir, "generated_data"))
+    config = TrainingConfig(
+        num_agents=NUM_AGENTS,
+        num_evaluators=NUM_EVALUATORS,
+        num_trainers=NUM_TRAINERS,
+        sims=TINY_SEARCH_SIMULATIONS,
+        run_dir=args.run_dir,
+        generated_data_dir=os.path.join(args.run_dir, "generated_data"),
+    )
     sys.exit(run_pipeline(args.run_dir, chess_net, config, shutdown_timeout=SHUTDOWN_TIMEOUT_SECONDS))
 
 

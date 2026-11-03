@@ -33,10 +33,13 @@ def test_command_line_overrides_defaults() -> None:
     assert config.maximum_lag == TrainingConfig().maximum_lag
 
 
-@pytest.mark.parametrize("csv_name", [
-    pytest.param(None, id="unset"),
-    pytest.param("missing.csv", id="missing_file"),
-])
+@pytest.mark.parametrize(
+    "csv_name",
+    [
+        pytest.param(None, id="unset"),
+        pytest.param("missing.csv", id="missing_file"),
+    ],
+)
 def test_missing_curriculum_falls_back_to_start_position(tmp_path: Path, csv_name: str) -> None:
     num_agents = 3
     csv_path = None if csv_name is None else str(tmp_path / csv_name)
@@ -54,7 +57,8 @@ def test_curriculum_gives_every_agent_puzzle_start_states(tmp_path: Path) -> Non
     num_agents = 2
     csv_path = tmp_path / "puzzles.csv"
     pd.DataFrame({"FEN": [MATE_IN_TWO_FEN], "Moves": [MATE_IN_TWO_MOVES], "Themes": ["mateIn2 short"]}).to_csv(
-        csv_path, index=False)
+        csv_path, index=False
+    )
 
     curricula = load_curricula(str(csv_path), num_agents)
 
@@ -69,8 +73,9 @@ def test_missing_expert_data_falls_back_to_empty(tmp_path: Path, monkeypatch: py
     monkeypatch.chdir(tmp_path)
 
     with pytest.warns(UserWarning, match="not found"):
-        memory = Memory(length_buffer=10, expert_data_path=str(tmp_path / "missing"),
-                        generated_data_dir=str(tmp_path / "generated"))
+        memory = Memory(
+            length_buffer=10, expert_data_path=str(tmp_path / "missing"), generated_data_dir=str(tmp_path / "generated")
+        )
 
     assert memory.expert_data == []
     assert len(memory) == 0

@@ -9,7 +9,9 @@ import numpy as np
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Apply the first move of each Lichess puzzle and append the positions to existing train/test pickles.")
+    parser = argparse.ArgumentParser(
+        description="Apply the first move of each Lichess puzzle and append the positions to existing train/test pickles."
+    )
     parser.add_argument("csv_path", help="Path to the sorted Lichess puzzle CSV.")
     parser.add_argument("data_dir", help="Directory containing train*.pkl and test*.pkl files to append to.")
     args = parser.parse_args()
@@ -24,14 +26,14 @@ def main():
     test_moves = []
 
     for rows in csv.iterrows():
-        fen = rows[1]['FEN']
-        moves = rows[1]['Moves'].split()
+        fen = rows[1]["FEN"]
+        moves = rows[1]["Moves"].split()
 
         # Select a move at random to add to the data set, not the first because thats a bad move
         move_to_include = np.random.choice(moves[1:])
 
         loser = fen.split()[1]
-        if 'opening' in rows[1]['Themes']:
+        if "opening" in rows[1]["Themes"]:
             win_val = 0
         else:
             win_val = 1
@@ -42,14 +44,14 @@ def main():
             try:
                 fen = board.push(fen, moves[idx])
             except RuntimeError:
-                print('Skipping')
+                print("Skipping")
                 break
 
             player = fen.split()[1]
 
             win = win_val if player != loser else -win_val
 
-            new_dp = {'fen': fen, 'moves': moves[idx + 1], 'value': win}
+            new_dp = {"fen": fen, "moves": moves[idx + 1], "value": win}
 
             if moves[idx] == move_to_include:
                 if train:
@@ -60,7 +62,9 @@ def main():
                 break
 
         count += 1
-        print(f"{100*count/num:.3f}% done. ({count}/{num}) Training moves: {len(train_moves)} Test moves:{len(test_moves)}")
+        print(
+            f"{100 * count / num:.3f}% done. ({count}/{num}) Training moves: {len(train_moves)} Test moves:{len(test_moves)}"
+        )
 
     appending_to = args.data_dir
     train_files = glob.glob(appending_to + "/train*.pkl")
@@ -71,7 +75,7 @@ def main():
     np.random.shuffle(train_moves)
 
     for chunk_idx, file in enumerate(train_files):
-        with open(file, 'rb') as f:
+        with open(file, "rb") as f:
             moves = pkl.load(f)
 
         lb = chunk_idx * chunk_size
@@ -79,7 +83,7 @@ def main():
 
         moves.extend(train_moves[lb:ub])
 
-        with open(file, 'wb') as f:
+        with open(file, "wb") as f:
             pkl.dump(moves, f)
 
         print(f"{file} complete. Extended by ")
@@ -92,7 +96,7 @@ def main():
     np.random.shuffle(test_moves)
 
     for chunk_idx, file in enumerate(test_files):
-        with open(file, 'rb') as f:
+        with open(file, "rb") as f:
             moves = pkl.load(f)
 
         lb = chunk_idx * chunk_size
@@ -100,7 +104,7 @@ def main():
 
         moves.extend(test_moves[lb:ub])
 
-        with open(file, 'wb') as f:
+        with open(file, "wb") as f:
             pkl.dump(moves, f)
 
 

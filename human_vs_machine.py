@@ -1,10 +1,14 @@
-import sys, math, threading, pygame, chess
+import sys
+import math
+import threading
+import pygame
+import chess
 from zero_style_chess_engine.engine_interface import EngineInterface  # Your engine interface module
 import multiprocessing as mp
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
-        mp.set_start_method('spawn', force=True)
+        mp.set_start_method("spawn", force=True)
         print("spawned")
     except RuntimeError:
         print("Failed to spawn")
@@ -37,10 +41,7 @@ if __name__ == '__main__':
     THINKING_COLOR = (255, 0, 0)
 
     # ---- Engine Initialization ----
-    engine = EngineInterface(
-        network_path=r"neural_nets/example_network.pt",
-        parallel=False
-    )
+    engine = EngineInterface(network_path=r"neural_nets/example_network.pt", parallel=False)
 
     # ---- Pygame Initialization ----
     pygame.init()
@@ -68,8 +69,9 @@ if __name__ == '__main__':
     # Placed in the left panel (x from MARGIN to MARGIN+BUTTON_WIDTH).
     queenside_button_rect = pygame.Rect(MARGIN, BOARD_Y, BUTTON_WIDTH, BUTTON_HEIGHT)
     confirm_button_rect = pygame.Rect(MARGIN, BOARD_Y + BUTTON_HEIGHT + BUTTON_SPACING, BUTTON_WIDTH, BUTTON_HEIGHT)
-    kingside_button_rect = pygame.Rect(MARGIN, BOARD_Y + 2 * (BUTTON_HEIGHT + BUTTON_SPACING), BUTTON_WIDTH, BUTTON_HEIGHT)
-
+    kingside_button_rect = pygame.Rect(
+        MARGIN, BOARD_Y + 2 * (BUTTON_HEIGHT + BUTTON_SPACING), BUTTON_WIDTH, BUTTON_HEIGHT
+    )
 
     # ---- Utility Functions ----
 
@@ -84,7 +86,7 @@ if __name__ == '__main__':
         # Draw pieces.
         for row in range(8):
             for col in range(8):
-                square_name = chr(ord('a') + col) + str(8 - row)
+                square_name = chr(ord("a") + col) + str(8 - row)
                 try:
                     sq = chess.parse_square(square_name)
                 except Exception:
@@ -94,11 +96,12 @@ if __name__ == '__main__':
                     symbol = piece.unicode_symbol()
                     text_surface = piece_font.render(symbol, True, (0, 0, 0))
                     text_rect = text_surface.get_rect(
-                        center=(BOARD_X + col * SQUARE_SIZE + SQUARE_SIZE / 2,
-                                BOARD_Y + row * SQUARE_SIZE + SQUARE_SIZE / 2)
+                        center=(
+                            BOARD_X + col * SQUARE_SIZE + SQUARE_SIZE / 2,
+                            BOARD_Y + row * SQUARE_SIZE + SQUARE_SIZE / 2,
+                        )
                     )
                     screen.blit(text_surface, text_rect)
-
 
     def draw_button(screen, text, rect):
         """Draw a simple button with the given text."""
@@ -107,21 +110,17 @@ if __name__ == '__main__':
         text_rect = text_surf.get_rect(center=rect.center)
         screen.blit(text_surf, text_rect)
 
-
     def pixel_to_square(x, y):
         """Convert window pixel coordinates to a chess square in algebraic notation (accounting for board offset)."""
         col = int((x - BOARD_X) // SQUARE_SIZE)
         row = int((y - BOARD_Y) // SQUARE_SIZE)
-        return chr(ord('a') + col) + str(8 - row)
-
+        return chr(ord("a") + col) + str(8 - row)
 
     def square_center(square):
         """Return the pixel center (x,y) of the given chess square (e.g. 'e2') accounting for board offset."""
-        col = ord(square[0]) - ord('a')
+        col = ord(square[0]) - ord("a")
         row = 8 - int(square[1])
-        return (BOARD_X + col * SQUARE_SIZE + SQUARE_SIZE / 2,
-                BOARD_Y + row * SQUARE_SIZE + SQUARE_SIZE / 2)
-
+        return (BOARD_X + col * SQUARE_SIZE + SQUARE_SIZE / 2, BOARD_Y + row * SQUARE_SIZE + SQUARE_SIZE / 2)
 
     def draw_arrow(screen, start, end, color=ARROW_COLOR, width=3):
         """Draw an arrow from start to end. Start and end are (x,y) tuples."""
@@ -135,7 +134,6 @@ if __name__ == '__main__':
         pygame.draw.line(screen, color, end, (arrow_x1, arrow_y1), width)
         pygame.draw.line(screen, color, end, (arrow_x2, arrow_y2), width)
 
-
     def display_endgame_box(message):
         """Display a semi‑transparent overlay box with an endgame message."""
         overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -147,7 +145,6 @@ if __name__ == '__main__':
         overlay.blit(text_surf, text_rect)
         screen.blit(overlay, (0, 0))
         pygame.display.flip()
-
 
     def get_promotion_choice():
         """Display an overlay for promotion choice and return the chosen letter."""
@@ -182,7 +179,6 @@ if __name__ == '__main__':
                     pygame.quit()
                     sys.exit()
 
-
     # ---- Thread Function for Engine Move ----
     def process_engine_move(user_move_str):
         global start_square, end_square, dragging, current_drag_pos, engine_thinking, engine_arrow
@@ -202,7 +198,6 @@ if __name__ == '__main__':
         current_drag_pos = None
         engine_thinking = False
 
-
     # ---- Main Loop ----
     while running:
         for event in pygame.event.get():
@@ -212,8 +207,7 @@ if __name__ == '__main__':
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 x, y = event.pos
                 # Check if click is in the board area (account for board offset) and engine is not thinking.
-                if (BOARD_X <= x < BOARD_X + BOARD_SIZE and
-                        BOARD_Y <= y < BOARD_Y + BOARD_SIZE and not engine_thinking):
+                if BOARD_X <= x < BOARD_X + BOARD_SIZE and BOARD_Y <= y < BOARD_Y + BOARD_SIZE and not engine_thinking:
                     start_square = pixel_to_square(x, y)
                     dragging = True
                     current_drag_pos = (x, y)
@@ -233,7 +227,7 @@ if __name__ == '__main__':
                             sq = chess.parse_square(start_square)
                             piece = engine.current_board.piece_at(sq)
                             if piece and piece.piece_type == chess.PAWN:
-                                if (piece.color and end_square[1] == '8') or (not piece.color and end_square[1] == '1'):
+                                if (piece.color and end_square[1] == "8") or (not piece.color and end_square[1] == "1"):
                                     promotion_letter = get_promotion_choice()
                                     move_str += promotion_letter
                             engine_thinking = True

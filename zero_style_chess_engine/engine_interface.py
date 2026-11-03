@@ -2,14 +2,14 @@
 import chess
 import chess.svg
 from neural_nets.conv_net import ChessNet
-from util.test_fen_strings import FenTests
 from util.queues import create_agents
-from multiprocessing import Queue, cpu_count
+from multiprocessing import Queue
 import time
 import numpy as np
 
+
 class EngineInterface:
-    def __init__(self, network_path, parallel: bool = False, time_per_move: float = 15., num_rollouts: int = 2000):
+    def __init__(self, network_path, parallel: bool = False, time_per_move: float = 15.0, num_rollouts: int = 2000):
         # Initialize your neural network and engine components.
         self.chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
         self.chess_net.load_network(network_path)
@@ -25,14 +25,21 @@ class EngineInterface:
             self.send_results_queues = [Queue() for _ in range(self.num_processes)]
 
             # Create the tree and evaluator – note that create_agents returns lists.
-            self.tree, evaluator, _, _, _ = create_agents("", self.num_processes , 1, 0, self.chess_net,
-                                                  training=False, verbose=False, inference_mode_queue=self.inference_queue,
-                                                  send_results_queue=self.send_results_queues)
+            self.tree, evaluator, _, _, _ = create_agents(
+                "",
+                self.num_processes,
+                1,
+                0,
+                self.chess_net,
+                training=False,
+                verbose=False,
+                inference_mode_queue=self.inference_queue,
+                send_results_queue=self.send_results_queues,
+            )
             [tree.start() for tree in self.tree]
         else:
             # Create the tree and evaluator – note that create_agents returns lists.
-            tree, evaluator, _, _, _ = create_agents("", 1, 1, 0, self.chess_net,
-                                                  training=False, verbose=True)
+            tree, evaluator, _, _, _ = create_agents("", 1, 1, 0, self.chess_net, training=False, verbose=True)
             self.tree = tree[0]
 
             # Initialize the board (standard starting position)
@@ -44,7 +51,6 @@ class EngineInterface:
         self.current_board = chess.Board()
         [ev.start() for ev in evaluator]
 
-
     def set_rollouts(self, rollout_count):
         self.rollouts = rollout_count
 
@@ -55,10 +61,12 @@ class EngineInterface:
             self.current_board.push(move)
             # Reset the search tree with the updated FEN.
 
-            castling_moves = {'e1g1': 'O-O',  # White kingside
-                'e1c1': 'O-O-O',  # White queenside
-                'e8g8': 'O-O',  # Black kingside
-                'e8c8': 'O-O-O'}  # Black queenside
+            castling_moves = {
+                "e1g1": "O-O",  # White kingside
+                "e1c1": "O-O-O",  # White queenside
+                "e8g8": "O-O",  # Black kingside
+                "e8c8": "O-O-O",
+            }  # Black queenside
 
             if move_uci in castling_moves.keys():
                 move_uci = castling_moves[move_uci]
@@ -87,7 +95,7 @@ class EngineInterface:
             # Request results from parallel processes
             [queue.put({"send_result": True, "move_to_push": None}) for queue in self.send_results_queues]
 
-            for idx in range (len(self.send_results_queues)):
+            for idx in range(len(self.send_results_queues)):
                 if idx == 0:
                     Ns, Qs, moves = self.inference_queue.get()
                 else:
