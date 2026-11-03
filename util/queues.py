@@ -4,7 +4,7 @@ import copy
 from typing import List, Dict, Optional, Tuple
 from neural_nets.conv_net import ChessNet
 from neural_nets.data.fen_chess_puzzles.curriculum import load_curricula
-from util.config import TrainingConfig
+from zero_style_chess_engine.config import TrainingConfig
 from zero_style_chess_engine.self_play import SelfPlayWorker
 from zero_style_chess_engine.evaluator import Evaluator
 from zero_style_chess_engine.trainer import Trainer

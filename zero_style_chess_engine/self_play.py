@@ -6,7 +6,7 @@ from multiprocessing import Queue, Process, synchronize
 from typing import List, Optional
 
 from neural_nets.data.fen_chess_puzzles.curriculum import LichessCurriculum
-from util.config import SearchConfig
+from zero_style_chess_engine.config import SearchConfig
 from zero_style_chess_engine.mcts import MCTS, START_STATE, Node
 from zero_style_chess_engine.messages import GameRecord, GameStats, PositionRecord
 import os

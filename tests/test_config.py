@@ -10,7 +10,7 @@ from omegaconf.errors import MissingMandatoryValue
 from pydantic import BaseModel, ValidationError
 
 from neural_nets.data.fen_chess_puzzles.curriculum import START_STATE, load_curricula
-from util.config import (
+from zero_style_chess_engine.config import (
     SearchConfig,
     SupervisedConfig,
     TrainingConfig,

@@ -1,4 +1,5 @@
-# Defaults live in util/config.py (SupervisedConfig) and reach Hydra through register_defaults.
+# Defaults live in zero_style_chess_engine/config/models.py (SupervisedConfig) and reach Hydra through
+# register_defaults (zero_style_chess_engine/config/hydra.py).
 # Add a key here only to override a default deliberately.
 # No Hydra output folder, no log file: the script runs in the current directory as before.
 defaults:

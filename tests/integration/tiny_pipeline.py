@@ -13,7 +13,7 @@ from typing import Any, ContextManager
 from neural_nets.conv_net import ChessNet
 from scripts.parallel_train import run_pipeline
 from util import queues
-from util.config import TrainingConfig
+from zero_style_chess_engine.config import TrainingConfig
 from zero_style_chess_engine.trainer import Trainer
 
 NUM_AGENTS = 2

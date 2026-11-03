@@ -10,7 +10,7 @@ import chess.engine
 import hydra
 from omegaconf import DictConfig
 
-from util.config import VsStockfishConfig, check_paths_exist, from_hydra, register_defaults
+from zero_style_chess_engine.config import VsStockfishConfig, check_paths_exist, from_hydra, register_defaults
 from zero_style_chess_engine.engine_interface import EngineInterface
 
 register_defaults("vs_stockfish_defaults", VsStockfishConfig)

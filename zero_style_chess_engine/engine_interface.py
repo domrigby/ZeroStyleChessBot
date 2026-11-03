@@ -2,7 +2,7 @@
 import chess
 import chess.svg
 from neural_nets.conv_net import ChessNet
-from util.config import TrainingConfig
+from zero_style_chess_engine.config import TrainingConfig
 from zero_style_chess_engine.evaluator import Evaluator
 from zero_style_chess_engine.mcts import MCTS
 from multiprocessing import Event, Queue

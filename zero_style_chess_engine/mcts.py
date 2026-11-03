@@ -5,7 +5,7 @@ from multiprocessing import Queue, synchronize
 from queue import Empty
 from typing import List, Dict, Optional, Tuple
 
-from util.config import SearchConfig
+from zero_style_chess_engine.config import SearchConfig
 from zero_style_chess_engine.messages import EvalRequest, EvalResult
 import chess_moves
 from enum import Enum

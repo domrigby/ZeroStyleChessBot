@@ -45,8 +45,9 @@ The defaults (4 agents, 1000 simulations per move) are meant for a GPU. Logging 
 offline mode, so no account is needed.
 
 Configuration uses [Hydra](https://hydra.cc) overrides (`key=value`) validated by Pydantic. Every option, with its
-default and a description, is in [`util/config.py`](util/config.py); the YAML files in [`conf/`](conf/) only hold
-Hydra settings. Search constants are nested: `search.c_puct=1.5`. Add `--cfg job` to print the resolved config
+default and a description, is in
+[`zero_style_chess_engine/config/models.py`](zero_style_chess_engine/config/models.py); the YAML files in
+[`conf/`](conf/) only hold Hydra settings. Search constants are nested: `search.c_puct=1.5`. Add `--cfg job` to print the resolved config
 without running. To continue a run, point Hydra at its folder:
 `uv run python -m scripts.parallel_train hydra.run.dir=sessions/run_at_<timestamp>`.
 

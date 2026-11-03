@@ -1,6 +1,6 @@
 import multiprocessing as mp
 from neural_nets.conv_net import ChessNet
-from util.config import TrainingConfig, check_paths_exist, from_hydra, register_defaults
+from zero_style_chess_engine.config import TrainingConfig, check_paths_exist, from_hydra, register_defaults
 from util.queues import create_agents
 from util.training_monitor import ChessEngineMonitor
 from zero_style_chess_engine.messages import GameStats, TrainerStats

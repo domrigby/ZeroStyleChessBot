@@ -14,7 +14,7 @@ import hydra
 from omegaconf import DictConfig
 
 from neural_nets.conv_net import ChessNet
-from util.config import SupervisedConfig, check_paths_exist, from_hydra, register_defaults
+from zero_style_chess_engine.config import SupervisedConfig, check_paths_exist, from_hydra, register_defaults
 
 
 class ChessDataset(Dataset):

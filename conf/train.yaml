@@ -1,4 +1,5 @@
-# Defaults live in util/config.py (TrainingConfig) and reach Hydra through register_defaults.
+# Defaults live in zero_style_chess_engine/config/models.py (TrainingConfig) and reach Hydra through
+# register_defaults (zero_style_chess_engine/config/hydra.py).
 # Add a key here only to override a default deliberately.
 # Hydra's run directory is the training run directory. Continue a run with hydra.run.dir=sessions/run_at_<timestamp>
 defaults:
