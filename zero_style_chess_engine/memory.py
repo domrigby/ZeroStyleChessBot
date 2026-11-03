@@ -11,14 +11,12 @@ class Turn(Enum):
 
 
 class DataPoint:
-    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.,
-                 parent_datapoint = None):
+    def __init__(self, state: str, moves: List[str], probs: List[float], win_val: float = 0.):
         self.state: str = state
         self.moves: List[str] = moves
         self.probs: List[float] = probs
         self.win_val: float = win_val
         self.player: str = state.split()[1]
-        self.parent_datapont: DataPoint = parent_datapoint
 
         # probs = np.array(probs)
         # entropy = -np.sum(probs * np.log(probs, where=(probs > 0), out=np.zeros_like(probs)))
@@ -30,8 +28,11 @@ class Memory:
 
     def __init__(self, length_buffer, expert_data_path: str = None, num_agents: int = 1, ):
 
-        # Save the states
+        # Save the states. A ring buffer: once full, self.index is the oldest entry, overwritten next
         self.data: List[DataPoint] = []
+
+        # Data points added since the last save_data call
+        self.unsaved_data: List[DataPoint] = []
 
         # So we can go back and update them with who won
         self.turn_list: List[DataPoint] = []
@@ -51,12 +52,19 @@ class Memory:
         if expert_data_path is not None:
             self.load_expert_data(expert_data_path)
 
-        #  Load data from previous games and get the length of the currne data
+        #  Load data from previous games
         self.load_directory()
-        self.last_index_saved = len(self.data)
 
     def __len__(self):
         return len(self.data)
+
+    def add_data_point(self, data_point: DataPoint):
+        """ Add to the buffer, overwriting the oldest data point once it holds max_len """
+        if len(self.data) < self.max_len:
+            self.data.append(data_point)
+        else:
+            self.data[self.index] = data_point
+        self.index = (self.index + 1) % self.max_len
 
     def save_game_to_memory(self, game, agent_id):
         """
@@ -66,7 +74,6 @@ class Memory:
         :return:
         """
 
-        parent_move: Optional[DataPoint] = None
         game_moves: List[DataPoint] = []
 
         entropy_of_batch: np.array = np.zeros(len(game))
@@ -92,18 +99,19 @@ class Memory:
             entropy_of_batch[idx] = entropy
 
             # Append the move to the set
-            data_point: DataPoint = DataPoint(state, moves, probs, value, parent_move)
+            data_point: DataPoint = DataPoint(state, moves, probs, value)
             game_moves.append(data_point)
-            parent_move: DataPoint = data_point
 
         # In order to maintain semi-IID data and prevent overfitting, I take two moves from each game from the training.
         # These are chosen due according to which ever have the highest entropy (lowest certain of move)
         # Reason for max adding... so that max entropy is only maximum 10 times more likely than the lowest possible moves
         print(f"Entropy = {entropy_of_batch}")
         entropy_of_batch += 0.1 * entropy_of_batch.max()
-        self.data.extend(np.random.choice(game_moves, size=min(2, len(game_moves)),
-                                          p=entropy_of_batch/entropy_of_batch.sum(),
-                                          replace=False))
+        chosen_moves = np.random.choice(game_moves, size=min(2, len(game_moves)),
+                                        p=entropy_of_batch/entropy_of_batch.sum(), replace=False)
+        for data_point in chosen_moves:
+            self.add_data_point(data_point)
+            self.unsaved_data.append(data_point)
 
     def get_batch(self, batch_size: int = 32, expert_ratio: float = 1.):
         """
@@ -111,7 +119,7 @@ class Memory:
         """
 
         # Set batch size for real and expert data
-        expert_batch = round(batch_size * expert_ratio)
+        expert_batch = round(batch_size * expert_ratio) if self.expert_data else 0
         real_batch = batch_size - expert_batch
 
         # Retrieve the batch
@@ -149,38 +157,39 @@ class Memory:
 
         return states, moves, probs, wins
 
-    def end_game(self, last_node: DataPoint, winner: str):
-
-        node = last_node
-
-        while node.parent_datapont:
-            if winner is not None:
-                if node.player == winner:
-                    last_node.win_val = 1
-                else:
-                    last_node.win_val = -1
-
     def load_directory(self):
         """
-        Function loads data from previous runs
+        Function loads data from previous runs: the most recent files, up to max_len data points
         :return:
         """
         path = r"neural_nets/generated_data"
-        files = glob.glob(os.path.join(path, "*.pkl"))
+        files = sorted(glob.glob(os.path.join(path, "*.pkl")), key=os.path.getmtime, reverse=True)
 
+        newest_first: List[List[DataPoint]] = []
+        num_loaded = 0
         for file in files:
+            if num_loaded >= self.max_len:
+                break
             with open(file, 'rb') as f:
                 moves = pkl.load(f)
-                self.data.extend(moves)
+            newest_first.append(moves)
+            num_loaded += len(moves)
+
+        # Add oldest first so the ring buffer keeps the newest max_len
+        for moves in reversed(newest_first):
+            for data_point in moves:
+                self.add_data_point(data_point)
 
     def save_data(self, file_path: str = None):
         if file_path is None:
             now = datetime.now()
             time_string = now.strftime("data_at%Y%m%d_%H%M%S")
-            file_path = f"neural_nets/generated_data/{time_string}_len_{len(self.data)-self.last_index_saved}.pkl"
+            file_path = f"neural_nets/generated_data/{time_string}_len_{len(self.unsaved_data)}.pkl"
+        if os.path.dirname(file_path):
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, 'wb') as f:
-            pkl.dump(self.data[self.last_index_saved:], f)
-        self.last_index_saved = len(self.data)
+            pkl.dump(self.unsaved_data, f)
+        self.unsaved_data = []
 
     def load_expert_data(self, path: str, file_format: str = "pkl", max_len: int = 250000):
         """

@@ -1,8 +1,9 @@
-from multiprocessing import Process, Queue, Lock
+from multiprocessing import Process, Queue, Event
 from queue import Empty
 from typing import List, Dict
 from neural_nets.conv_net import ChessNet
-import numpy as np
+import contextlib
+import time
 import torch
 from util.parallel_profiler import parallel_profile
 
@@ -10,9 +11,10 @@ class NeuralNetHandling(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
 
     test_mode = False
+    idle_sleep_seconds = 0.001
 
     def __init__(self, neural_net: ChessNet, process_queues: List[Queue] = None, weights_queue: Queue = None,
-                 results_queue_dict: Dict[int, Queue] = None, batch_size: int = 64):
+                 results_queue_dict: Dict[int, Queue] = None, batch_size: int = 64, stop_event: Event = None):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -26,7 +28,7 @@ class NeuralNetHandling(Process):
         else:
             self.results_queue = {}
 
-        self.running = True
+        self.stop_event = stop_event if stop_event is not None else Event()
 
         self.batch_size = batch_size
 
@@ -41,32 +43,27 @@ class NeuralNetHandling(Process):
         if self.results_queue is None:
             raise ValueError("NO RESULTS QUEUE: User must provide results queue from their game tree.")
 
-        stream = torch.cuda.Stream()
+        stream_context = torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() \
+            else contextlib.nullcontext()
 
-        while self.running:
-            with torch.cuda.stream(stream):
+        while not self.stop_event.is_set():
+            with stream_context:
                 self.collect_and_process()
             self.check_for_network_update()
+
+        # Don't block exit flushing results to agents which have already stopped
+        for queue in self.results_queue.values():
+            queue.cancel_join_thread()
 
     def collect_and_process(self):
         agent_ids, hashes, states, legal_moves = [], [], [], []
 
-        queue_occupancy = np.array([queue.qsize() for queue in self.process_queue], dtype=int)
-        total_occupancy = queue_occupancy.sum()
+        # Equal share of the batch per agent. Queue.qsize() isn't used as it raises NotImplementedError on macOS.
+        per_queue_allowance = max(1, self.batch_size // len(self.process_queue))
 
-        if total_occupancy == 0:
-            return
+        for queue in self.process_queue:
 
-        # Compute batch allocation **only for non-empty queues**
-        batch_size_allowance = np.round(self.batch_size * queue_occupancy / total_occupancy).astype(int)
-
-        # Process each queue in **parallel** (avoids nested loops)
-        for idx, (queue, allowance) in enumerate(zip(self.process_queue, batch_size_allowance)):
-
-            if queue.empty():
-                continue
-
-            for _ in range(min(queue_occupancy[idx], allowance)):  # Limit max processed items
+            for _ in range(per_queue_allowance):
                 try:
                     agent_id, the_hash, state, legal_moves_strings = queue.get_nowait()
                     agent_ids.append(agent_id)
@@ -76,9 +73,10 @@ class NeuralNetHandling(Process):
                     self.processed_count += 1
 
                 except Empty:
-                    break  # Queue was unexpectedly empty
+                    break
 
         if not hashes:
+            time.sleep(self.idle_sleep_seconds)
             return
 
         # Tensorization & Inference
@@ -139,9 +137,6 @@ class NeuralNetHandling(Process):
 
     def update_node_and_edges(self, state, evaluation):
         pass
-
-    def stop(self):
-        self.running = False
 
 def material_advantage_normalized(fen):
     """

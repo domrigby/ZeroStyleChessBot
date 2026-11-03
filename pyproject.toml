@@ -19,6 +19,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "line-profiler>=4.2.0",
+    "psutil>=7.2.2",
     "pytest>=9.2.0",
 ]
 
@@ -44,4 +45,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "integration: multi-process tests that spawn agents/evaluators/trainers (deselect with -m 'not integration')",
+    "slow: integration tests that run for minutes (deselect with -m 'not slow')",
 ]

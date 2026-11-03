@@ -2,7 +2,8 @@ import os
 import traceback
 
 def error_logger(func):
-    """Decorator to log errors to a file defined in the class property."""
+    """Decorator to log errors to a file defined in the class property, then re-raise them so the
+    process exits with a non-zero exit code."""
 
     def wrapper(self, *args, **kwargs):
         try:
@@ -11,7 +12,8 @@ def error_logger(func):
             log_file = getattr(self, "log_file_name", "default_log.txt")
 
             # Ensure directory exists
-            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            if os.path.dirname(log_file):
+                os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
             # Write to log file
             with open(log_file, "a") as f:
@@ -19,5 +21,6 @@ def error_logger(func):
                 f.write(traceback.format_exc() + "\n")
 
             print(f"Error logged in {log_file}")
+            raise
 
     return wrapper

@@ -1,4 +1,4 @@
-from multiprocessing import Queue
+from multiprocessing import Queue, Event
 from torch import multiprocessing
 from datetime import datetime
 import os
@@ -18,7 +18,8 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
     :param num_trainers: number of trainers
     :param network: the neural network being used
     :param start_state
-    :return:
+    :return: agents, evaluators, trainers, data queues for the supervisor, and the stop event shared by every
+        process (set it to make them all shut down)
     """
 
     agents_per_evaluator = num_agents / num_evaluators
@@ -32,7 +33,11 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
     process_queues: List[List[Queue]] = [[] for _ in range(num_evaluators)]
     training_queues: List[List[Queue]] = [[] for _ in range(num_trainers)]
     data_queues: Dict[str, List[Queue]] = {'agents': [], 'training': []}
-    weights_queue: Queue = multiprocessing.Queue()
+    stop_event = Event()
+
+    # One weights queue per evaluator so every evaluator receives every update. maxsize=1: the trainer replaces an
+    # update the evaluator hasn't picked up yet rather than queueing a backlog of state dicts.
+    weights_queues: List[Queue] = [multiprocessing.Queue(maxsize=1) for _ in range(num_evaluators)]
 
     for idx in range(num_agents):
 
@@ -61,7 +66,8 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
         agent = GameTree(save_dir=save_dir, training=training, multiprocess=True, process_queue=process_queue,
                          experience_queue=training_queue, results_queue=results_queue, data_queue=agent_data_queue,
                          start_state=start_state, verbose=verbose, inference_mode=inference_mode,
-                         infering_mode_queue=inference_mode_queue, send_results_queue=send_queue)
+                         infering_mode_queue=inference_mode_queue, send_results_queue=send_queue,
+                         stop_event=stop_event)
 
         agents.append(agent)
         results_queue_dicts[agent.agent_id] = results_queue
@@ -69,8 +75,8 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
     # Evaluator
     evaluators: List[NeuralNetHandling] = []
     for idx in range(num_evaluators):
-        evaluator = NeuralNetHandling(neural_net=network, process_queues=process_queues[idx], weights_queue=weights_queue,
-                                     results_queue_dict=results_queue_dicts, batch_size=256)
+        evaluator = NeuralNetHandling(neural_net=network, process_queues=process_queues[idx], weights_queue=weights_queues[idx],
+                                     results_queue_dict=results_queue_dicts, batch_size=256, stop_event=stop_event)
         evaluators.append(evaluator)
 
     trainers: List[TrainingProcess] = []
@@ -79,6 +85,7 @@ def create_agents(save_dir: str, num_agents: int, num_evaluators: int, num_train
         data_queues['training'].append(training_data_queue)
         trainers.append(TrainingProcess(save_dir=save_dir ,neural_net=network, experience_queues=training_queues[idx],
                                         batch_size=128, num_agents=num_agents, data_queue=training_data_queue,
-                                        weights_queue=weights_queue, min_num_batches_to_train=1, load_path=expert_data_path))
+                                        weights_queues=weights_queues, min_num_batches_to_train=1,
+                                        load_path=expert_data_path, stop_event=stop_event))
 
-    return agents, evaluators, trainers, data_queues
+    return agents, evaluators, trainers, data_queues, stop_event

@@ -1,11 +1,12 @@
-from multiprocessing import Process, Queue, Lock
-from queue import Empty
+from multiprocessing import Process, Queue, Event
+from queue import Empty, Full
 from zero_style_chess_engine.memory import Memory
 from util.parallel_error_log import error_logger
 from neural_nets.conv_net import ChessNet
 from neural_nets.generic_net import GenericNet
 
 import chess_moves
+import contextlib
 from typing import List
 import numpy as np
 import time
@@ -17,10 +18,12 @@ import torch
 class TrainingProcess(Process):
     """ This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
     min_games_to_train = 0
+    idle_sleep_seconds = 0.01
 
-    def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, weights_queue: Queue = None,
+    def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, weights_queues: List[Queue] = None,
                  batch_size: int = 1024, minibatch_size: int = 32, min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None, load_path: str = None,
-                 weights_update_freq: int = 100, expert_ratio: float = 0.9, expert_ratio_decay_rate: float = 0.995, update_period: int = 25):
+                 weights_update_freq: int = 100, expert_ratio: float = 0.9, expert_ratio_decay_rate: float = 0.995, update_period: int = 25,
+                 stop_event: Event = None):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -35,9 +38,9 @@ class TrainingProcess(Process):
         #  Set up the queues
         self.experience_queue = experience_queues
         self.data_queue = data_queue
-        self.weights_queue = weights_queue
+        self.weights_queues: List[Queue] = weights_queues if weights_queues is not None else []
 
-        self.running: int = True
+        self.stop_event = stop_event if stop_event is not None else Event()
 
         #  Set hyperparameters
         self.weights_update_freq: int = weights_update_freq
@@ -82,26 +85,13 @@ class TrainingProcess(Process):
         :return:
         """
 
-        # Create cuda stream
-        stream = torch.cuda.Stream()
+        stream_context = torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() \
+            else contextlib.nullcontext()
 
-        while True:
+        while not self.stop_event.is_set():
 
-            for queue in self.experience_queue:
-
-                for _ in range(self.batch_size):
-                    try:
-                        game_states, agent_id = queue.get_nowait()
-                        self.memory.save_game_to_memory(game_states, agent_id)
-                        self.games_played += 1
-                        print(f"Games played: {self.games_played}")
-
-                        # New game recieved... lets do a training batch
-                        if self.games_played >= self.min_games_to_train:
-                            with torch.cuda.stream(stream):
-                                self.train_neural_network()
-                    except Empty:
-                        break
+            if not self.collect_experience(stream_context):
+                time.sleep(self.idle_sleep_seconds)
 
             time_now = time.time()
             if time_now - self.last_update_time > self.update_period and self.data_queue is not None:
@@ -126,9 +116,39 @@ class TrainingProcess(Process):
                 self.last_network_save = time.time()
                 self.memory.save_data()
 
-            # Do a weights update every N training steps
-            if self.training_count > 0 and self.training_count%self.weights_update_freq == 0:
-                self.send_weights_update()
+        # Final checkpoint so a clean shutdown never loses training progress
+        self.neural_net.save_network(f'{self.save_dir}/RL_tuned_{self.training_count}.pt')
+        self.memory.save_data()
+
+        # Don't block exit flushing queues whose readers have already stopped
+        for queue in self.weights_queues + [self.data_queue]:
+            if queue is not None:
+                queue.cancel_join_thread()
+
+    def collect_experience(self, stream_context) -> bool:
+        """
+        Move finished games from the agents into memory, doing a training step per game.
+        :return: whether any game was received
+        """
+        received = False
+        for queue in self.experience_queue:
+
+            for _ in range(self.batch_size):
+                try:
+                    game_states, agent_id = queue.get_nowait()
+                except Empty:
+                    break
+
+                received = True
+                self.memory.save_game_to_memory(game_states, agent_id)
+                self.games_played += 1
+                print(f"Games played: {self.games_played}")
+
+                # New game recieved... lets do a training batch
+                if self.games_played >= self.min_games_to_train:
+                    with stream_context:
+                        self.train_neural_network()
+        return received
 
     def train_neural_network(self):
         """ Train the neural network using the experiences from the memory """
@@ -160,12 +180,22 @@ class TrainingProcess(Process):
 
         self.training_count += 1
 
+        # Checked here, not in the run loop, so exactly one update is sent per weights_update_freq steps
+        if self.training_count % self.weights_update_freq == 0:
+            self.send_weights_update()
+
     def send_weights_update(self):
         weights = {k: v.cpu() for k,v in self.neural_net.state_dict().items()}
-        self.weights_queue.put(weights)
-
-    def stop(self):
-        self.running = False
+        for queue in self.weights_queues:
+            try:
+                queue.put_nowait(weights)
+            except Full:
+                # The evaluator hasn't taken the previous update yet: replace it with this newer one
+                try:
+                    queue.get(timeout=1.)
+                except Empty:
+                    pass  # the evaluator took it in the meantime
+                queue.put_nowait(weights)
 
 if __name__ == "__main__":
     from multiprocessing import Queue

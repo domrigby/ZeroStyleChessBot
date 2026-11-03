@@ -25,13 +25,13 @@ class EngineInterface:
             self.send_results_queues = [Queue() for _ in range(self.num_processes)]
 
             # Create the tree and evaluator – note that create_agents returns lists.
-            self.tree, evaluator, _, _ = create_agents("", self.num_processes , 1, 0, self.chess_net,
+            self.tree, evaluator, _, _, _ = create_agents("", self.num_processes , 1, 0, self.chess_net,
                                                   training=False, verbose=False, inference_mode_queue=self.inference_queue,
                                                   send_results_queue=self.send_results_queues)
             [tree.start() for tree in self.tree]
         else:
             # Create the tree and evaluator – note that create_agents returns lists.
-            tree, evaluator, _, _ = create_agents("", 1, 1, 0, self.chess_net,
+            tree, evaluator, _, _, _ = create_agents("", 1, 1, 0, self.chess_net,
                                                   training=False, verbose=True)
             self.tree = tree[0]
 

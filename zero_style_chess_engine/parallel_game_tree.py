@@ -2,7 +2,7 @@ import chess
 import numpy as np
 from numpy.random import default_rng
 import time
-from multiprocessing import Queue, Process
+from multiprocessing import Queue, Process, Event
 from queue import Empty
 from typing import List, Dict, Optional, Tuple
 
@@ -176,6 +176,8 @@ class GameTree(Process):
     full_rollout_virtual_loss = False
     curiculum = True
     maximum_lag = 8
+    sims = 1000
+    lag_wait_timeout_seconds = 0.1
 
     agent_count = 0
 
@@ -184,9 +186,11 @@ class GameTree(Process):
                  experience_queue: Queue = None, results_queue: Queue = None,
                  data_queue: Queue = None, start_state: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                  verbose: bool = False, inference_mode: bool = None,
-                 infering_mode_queue: Queue = None, send_results_queue: Queue = None):
+                 infering_mode_queue: Queue = None, send_results_queue: Queue = None, stop_event: Event = None):
 
         super().__init__()
+
+        self.stop_event = stop_event if stop_event is not None else Event()
 
         self.agent_id = GameTree.agent_count
         GameTree.agent_count += 1
@@ -260,6 +264,9 @@ class GameTree(Process):
 
         # Perform N rollouts
         for idx in range(number_of_expansions):
+
+            if self.stop_event.is_set():
+                break
 
             if self.verbose:
                 print(f"\rMove = {idx}", end="")
@@ -465,7 +472,7 @@ class GameTree(Process):
 
         # Make sure its even to not get bias to wins
         if len(game_states) % 2 != 0:
-            game_states = game_states[:len(game_states) // 2]
+            game_states = game_states[:-1]
 
         if len(game_states) == 0:
             return
@@ -534,8 +541,11 @@ class GameTree(Process):
 
         # Clear the queue
         while True:
+            lagging = self.number_sent - self.number_returned >= self.maximum_lag
             try:
-                results = self.results_queue.get_nowait()  # Non-blocking get
+                # Block (briefly, so the stop event is still checked) only when we must wait for the evaluator
+                results = self.results_queue.get(timeout=self.lag_wait_timeout_seconds) if lagging \
+                    else self.results_queue.get_nowait()
             except Empty:
                 results = []
 
@@ -576,7 +586,7 @@ class GameTree(Process):
                 node.awaiting_processing = False
                 self.backpropagation(visited_moves, value + reward)
 
-            if self.number_sent - self.number_returned < self.maximum_lag:
+            if self.number_sent - self.number_returned < self.maximum_lag or self.stop_event.is_set():
                 #  If we have a processing lag of less than the maximum allowed lag then we can continue
                 return
 
@@ -598,9 +608,6 @@ class GameTree(Process):
         # Update root node
         self.root = new_node
 
-    def end_game(self, white_win: bool):
-        self.memory.end_game(white_win)
-
     def run(self):
         self.environment = chess_moves.ChessEngine()
 
@@ -608,18 +615,22 @@ class GameTree(Process):
             self.train()
         else:
             print("Beginning infinite rollouts")
-            while True:
+            while not self.stop_event.is_set():
                 self.parallel_search(self.root, int(10e25))
+
+        # Don't block exit flushing queues whose readers have already stopped
+        for queue in (self.process_queue, self.experience_queue, self.data_queue):
+            if queue is not None:
+                queue.cancel_join_thread()
 
     @error_logger
     def train(self, n_games: int = 1000000):
 
         game_count = 0
-        sims = 1000
 
         print(f"Starting training run on agent {self.agent_id}")
 
-        while True:
+        while not self.stop_event.is_set():
 
             # Start a new game
             move_count = 0
@@ -641,10 +652,10 @@ class GameTree(Process):
             node = self.root
             player_check_mated = None
 
-            while not main_board.is_game_over():
+            while not main_board.is_game_over() and not self.stop_event.is_set():
 
                 start_time = time.time()
-                self.parallel_search(current_node=node, number_of_expansions=sims)
+                self.parallel_search(current_node=node, number_of_expansions=self.sims)
                 end_time = time.time()
 
                 print(f"\n\nTime with parallel search {end_time - start_time:.3f}s. {self.time_waiting:.3f} "
@@ -702,15 +713,15 @@ class GameTree(Process):
                     self.save_results_to_memory(self.root)
                     break
 
+            if self.stop_event.is_set():
+                break
+
             if player_check_mated == 'w':
                 white_win = False
             elif player_check_mated == 'b':
                 white_win = True
             else:
                 white_win = None
-
-            if not self.multiprocess:
-                self.end_game(white_win)
 
             if self.data_queue is not None:
                 self.send_update_to_main_thread(white_win, move_count)
