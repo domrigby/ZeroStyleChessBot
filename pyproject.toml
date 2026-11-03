@@ -68,10 +68,7 @@ files = [
     "zero_style_chess_engine",
     "util",
     "neural_nets",
-    "parallel_train.py",
-    "human_vs_machine.py",
-    "chess_engine_vs_zero_style.py",
-    "supervised_learning.py",
+    "scripts",
     "tests",
 ]
 
@@ -81,10 +78,7 @@ module = [
     "util.*",
     "neural_nets.conv_net",
     "neural_nets.encoding",
-    "parallel_train",
-    "human_vs_machine",
-    "chess_engine_vs_zero_style",
-    "supervised_learning",
+    "scripts.*",
     "tests.*",
 ]
 disallow_untyped_defs = true

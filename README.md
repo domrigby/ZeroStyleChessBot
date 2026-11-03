@@ -29,17 +29,17 @@ scripts/download_weights.sh    # downloads the pretrained network to neural_nets
 
 **Play against the engine** (opens a pygame window):
 ```bash
-uv run python human_vs_machine.py
+uv run python -m scripts.human_vs_machine
 ```
 Drag a piece to its target square, then press **Confirm Move**. The engine's reply is drawn as a blue arrow. It
 searches 2000 MCTS simulations per move: about 7 s on an Apple-silicon laptop CPU, longer on slower machines.
 
 **Run a short training job on CPU:**
 ```bash
-uv run python parallel_train.py --num_agents 2 --sims 32
+uv run python -m scripts.parallel_train --num_agents 2 --sims 32
 ```
 Press Ctrl+C to stop it. It shuts down cleanly and writes a final checkpoint to `sessions/run_at_<timestamp>/`.
-Run `uv run python parallel_train.py --help` for every option. The defaults (4 agents, 1000 simulations per move)
+Run `uv run python -m scripts.parallel_train --help` for every option. The defaults (4 agents, 1000 simulations per move)
 are meant for a GPU. Logging goes to TensorBoard and to wandb in offline mode, so no account is needed.
 
 By default, self-play starts from the standard position and uses no expert data. To use the Lichess puzzle
@@ -49,7 +49,7 @@ the repo; [`neural_nets/data/data_sources.md`](neural_nets/data/data_sources.md)
 ## Architecture
 
 ```
-                parallel_train.py (supervisor)
+        scripts/parallel_train.py (supervisor)
    spawns every process and watches for one dying; Ctrl+C or a crash
    sets the shared stop event, and every process shuts down
    ──────────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ the repo; [`neural_nets/data/data_sources.md`](neural_nets/data/data_sources.md)
   pass, and send the priors and values back.
 - **The trainer** (`trainer.py`) turns finished games into training data, samples batches from the replay buffer
   (`memory.py`), trains, and pushes new weights to every evaluator.
-- **The supervisor** (`parallel_train.py`) uses the `spawn` start method. Each process checks a shared stop event, so
+- **The supervisor** (`scripts/parallel_train.py`) uses the `spawn` start method. Each process checks a shared stop event, so
   shutdown is orderly: trainers first (they do the final save), then evaluators, then agents. The exit code is
   non-zero if any process crashed.
 
@@ -136,8 +136,8 @@ CI runs all of the above on CPU for every push to `main` and every pull request.
 binding, update `stubs/chess_moves.pyi` by hand.
 
 Other entry points:
-- `supervised_learning.py --data_dir DIR`: behavioural-cloning pre-training on pickled games.
-- `chess_engine_vs_zero_style.py --stockfish_path PATH`: play the network against Stockfish.
+- `uv run python -m scripts.supervised_learning --data_dir DIR`: behavioural-cloning pre-training on pickled games.
+- `uv run python -m scripts.chess_engine_vs_zero_style --stockfish_path PATH`: play the network against Stockfish.
 
 ## Future work
 
