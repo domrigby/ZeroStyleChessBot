@@ -95,25 +95,24 @@ This was a very engaging challenge to implement on extremely limited hardware.
    git clone https://github.com/domrigby/ZeroStyleChessBot.git
    cd ZeroStyleChessBot
 
-2. **Build C++ Engine**
+2. Create the Python env (requires [uv](https://docs.astral.sh/uv/))
+    ```
+    uv sync
+    source .venv/bin/activate
+
+3. **Build C++ Engine** (with the env active, so it builds against the right Python)
     ```
     cd cpp_chess_env
     bash build_engine.sh         # Linux
     bash install_cmake.sh        # if cmake missing
 
-3. Create & activate Python env
-    ```
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-
 4. Run Training
     ```
-    python paralel_train.py
+    uv run python paralel_train.py
 
 Play vs. Engine
 
-    python human_vs_machine.py
+    uv run python human_vs_machine.py
 
 📈 Results
 

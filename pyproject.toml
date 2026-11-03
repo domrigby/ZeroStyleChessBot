@@ -1,0 +1,27 @@
+[project]
+name = "zero-style-chess-bot"
+version = "0.1.0"
+description = "AlphaZero-style chess engine: supervised pre-training plus MCTS self-play."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "chess>=1.11.2",
+    "matplotlib>=3.10.3",
+    "numba>=0.61.2",
+    "numpy>=2.2.6",
+    "pandas>=2.2.3",
+    "pygame>=2.6.1",
+    "sympy>=1.14.0",
+    "tensorboard>=2.19.0",
+    "torch>=2.7.0",
+    "wandb>=0.19.0",
+]
+
+[dependency-groups]
+dev = [
+    "line-profiler>=4.2.0",
+]
+
+[tool.uv]
+# Scripts are run from the repo root; the C++ chess_moves module is built separately.
+package = false
