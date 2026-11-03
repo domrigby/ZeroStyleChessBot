@@ -102,3 +102,28 @@ def test_search_returns_at_once_when_stop_event_is_set() -> None:
 
     assert tree.root.Ns.sum() == 0
     assert evaluator.requests_answered == 0
+
+
+class SkewedEvaluator(InstantEvaluator):
+    """Answers with priors proportional to 1, 2, ..., N so they can't be mistaken for the uniform initial priors"""
+
+    def put(self, request: EvalRequest) -> None:
+        num_moves = len(request.legal_moves)
+        self.results_queue.put([EvalResult(request.node_id, 0.0, np.arange(1.0, num_moves + 1))])
+        self.requests_answered += 1
+
+
+def test_root_priors_come_from_the_evaluator() -> None:
+    results_queue: "queue.Queue[Any]" = queue.Queue()
+    tree = MCTS(
+        cast(multiprocessing.queues.Queue, SkewedEvaluator(results_queue)),
+        cast(multiprocessing.queues.Queue, results_queue),
+        agent_id=0,
+        stop_event=multiprocessing.Event(),
+    )
+    tree.reset(START_FEN)
+
+    tree.search(number_of_expansions=1)
+
+    expected = np.arange(1.0, tree.root.number_legal_moves + 1)
+    np.testing.assert_allclose(tree.root.Ps, expected / expected.sum())

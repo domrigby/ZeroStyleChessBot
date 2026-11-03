@@ -165,6 +165,10 @@ class SelfPlayWorker(Process):
                 end_nodes = self.mcts.search(number_of_expansions=self.sims)
                 end_time = time.time()
 
+                # A search cut short by the stop event may not have visited the root's moves: don't pick one
+                if self.stop_event.is_set():
+                    break
+
                 for end_node in end_nodes:
                     # These are states which we didn't visit with the root node but were end games.
                     # In order to maintain high quality data we only save the move whilst the game was being played optimally

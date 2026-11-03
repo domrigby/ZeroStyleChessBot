@@ -87,6 +87,9 @@ class Node:
         # Set a flag saying it has not been processed yet
         self.awaiting_processing: bool = False
 
+        # Whether Ps holds the network's priors yet (until then they're uniform)
+        self.evaluated: bool = False
+
     def puct(self, c_puct: float) -> int:
         if self.number_legal_moves == 1:
             return 0
@@ -203,6 +206,10 @@ class MCTS:
         if self.environment is None:
             self.environment = chess_moves.ChessEngine()
 
+        # Rollouts only send new leaves to the evaluator, so a fresh root would otherwise keep uniform priors
+        if not self.root.evaluated and not self.root.branch_complete and not self.stop_event.is_set():
+            self.evaluate_root()
+
         current_node = self.root
 
         # Perform N rollouts
@@ -259,26 +266,7 @@ class MCTS:
                     # the result back up the tree
                     self.backpropagation(visited_moves, reward, undo_v_loss=False)
 
-                # Give the node an id so we can find it again when its evaluation comes back
-                node_id = self.next_node_id
-                self.next_node_id += 1
-
-                self.pending_evaluations[node_id] = (current_node, visited_moves, reward)
-                assert self.eval_request_queue is not None
-                self.eval_request_queue.put(
-                    EvalRequest(
-                        agent_id=self.agent_id,
-                        node_id=node_id,
-                        fen=current_node.state,
-                        legal_moves=current_node.legal_move_strings,
-                    )
-                )
-
-                # Increment the number of nodes sent for processing
-                self.number_sent += 1
-
-                # Set the node is current node is awaiting processing
-                current_node.awaiting_processing = True
+                self.send_for_evaluation(current_node, visited_moves, reward)
 
                 # If we reach a terminal node not in the main search we still save the game to increase data.
                 if current_node.branch_complete and current_node.game_over_type is not GameOverType.NO_TAKES_DRAW:
@@ -288,6 +276,44 @@ class MCTS:
             current_node = self.root
 
         return end_nodes
+
+    def send_for_evaluation(self, node: Node, visited_moves: List[Tuple[Node, int]], reward: float) -> None:
+        # Give the node an id so we can find it again when its evaluation comes back
+        node_id = self.next_node_id
+        self.next_node_id += 1
+
+        self.pending_evaluations[node_id] = (node, visited_moves, reward)
+        assert self.eval_request_queue is not None
+        self.eval_request_queue.put(
+            EvalRequest(
+                agent_id=self.agent_id,
+                node_id=node_id,
+                fen=node.state,
+                legal_moves=node.legal_move_strings,
+            )
+        )
+
+        # Increment the number of nodes sent for processing
+        self.number_sent += 1
+
+        # Set the node is current node is awaiting processing
+        node.awaiting_processing = True
+
+    def evaluate_root(self) -> None:
+        """Get the network's priors for the root before the first rollout, blocking until they arrive (or stop)"""
+        assert self.eval_result_queue is not None
+
+        # A root advanced to from a recent leaf may already be in flight: then just wait for it
+        if not self.root.awaiting_processing:
+            # No moves led here within this search, so there is nothing to backpropagate
+            self.send_for_evaluation(self.root, [], 0.0)
+
+        while not self.root.evaluated and not self.stop_event.is_set():
+            try:
+                results: List[EvalResult] = self.eval_result_queue.get(timeout=self.lag_wait_timeout_seconds)
+            except Empty:
+                continue
+            self.apply_results(results)
 
     def backpropagation(
         self, visited_moves: List[Tuple[Node, int]], observed_reward: float, undo_v_loss: bool = True
@@ -341,45 +367,50 @@ class MCTS:
             except Empty:
                 results = []
 
-            for result in results:
-                # Increment number returned
-                self.number_returned += 1
-
-                # Retrieve the node this result belongs to
-                node, visited_moves, reward = self.pending_evaluations.pop(result.node_id)
-
-                # Update node value
-                node.V = result.value
-
-                # Parameters for Dirichlet noise
-                alpha = self.search_config.dirichlet_alpha  # Dirichlet distribution parameter
-                epsilon = self.search_config.dirichlet_epsilon  # Blending factor
-
-                # Copy: normalised in place below
-                Ps = np.array(result.priors)
-
-                # Normalize probabilities
-                sum_Ps = Ps.sum()
-                if sum_Ps > 1e-6:
-                    Ps /= sum_Ps
-                else:
-                    Ps = np.ones_like(Ps) / len(Ps)  # Assign uniform probability if sum is too small
-
-                # Apply Dirichlet noise
-                if self.add_noise:
-                    dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
-                    Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
-
-                # Update move probabilities
-                for move_idx, prob in zip(range(len(node.moves)), Ps):
-                    node.Ps[move_idx] = prob
-
-                node.awaiting_processing = False
-                self.backpropagation(visited_moves, result.value + reward)
+            self.apply_results(results)
 
             if self.number_sent - self.number_returned < self.maximum_lag or self.stop_event.is_set():
                 #  If we have a processing lag of less than the maximum allowed lag then we can continue
                 return
+
+    def apply_results(self, results: List[EvalResult]) -> None:
+        """Set each evaluated node's value and priors (with Dirichlet noise in self-play) and backpropagate"""
+        for result in results:
+            # Increment number returned
+            self.number_returned += 1
+
+            # Retrieve the node this result belongs to
+            node, visited_moves, reward = self.pending_evaluations.pop(result.node_id)
+
+            # Update node value
+            node.V = result.value
+
+            # Parameters for Dirichlet noise
+            alpha = self.search_config.dirichlet_alpha  # Dirichlet distribution parameter
+            epsilon = self.search_config.dirichlet_epsilon  # Blending factor
+
+            # Copy: normalised in place below
+            Ps = np.array(result.priors)
+
+            # Normalize probabilities
+            sum_Ps = Ps.sum()
+            if sum_Ps > 1e-6:
+                Ps /= sum_Ps
+            else:
+                Ps = np.ones_like(Ps) / len(Ps)  # Assign uniform probability if sum is too small
+
+            # Apply Dirichlet noise
+            if self.add_noise:
+                dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
+                Ps = (1 - epsilon) * Ps + epsilon * dirichlet_noise
+
+            # Update move probabilities
+            for move_idx, prob in zip(range(len(node.moves)), Ps):
+                node.Ps[move_idx] = prob
+
+            node.awaiting_processing = False
+            node.evaluated = True
+            self.backpropagation(visited_moves, result.value + reward)
 
     def select_child(self, tau: float = 1.0) -> Tuple[Node, str, int]:
         """
