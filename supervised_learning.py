@@ -9,6 +9,7 @@ import chess_moves
 import pickle
 import pickle as pkl
 import glob
+import os
 import time
 
 from typing import List
@@ -146,6 +147,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train ChessNet with checkpointing.")
     parser.add_argument("--checkpoint", type=str, default=None,
                         help="Path to checkpoint file to resume training.")
+    parser.add_argument("--data_dir", type=str, required=True,
+                        help="Directory containing train*pkl and test*pkl files.")
     args = parser.parse_args()
 
     # Parameters
@@ -233,9 +236,8 @@ if __name__ == '__main__':
     start_time = time.time()
     last_checkpoint_time = time.time()
 
-    import glob
-    train_files = glob.glob("/home/dom/1TB_drive/chess_data/train*pkl")
-    test_files = glob.glob("/home/dom/1TB_drive/chess_data/test*pkl")
+    train_files = glob.glob(os.path.join(args.data_dir, "train*pkl"))
+    test_files = glob.glob(os.path.join(args.data_dir, "test*pkl"))
 
 
     # Define the test data set size (these are completely unseen games)

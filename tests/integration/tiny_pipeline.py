@@ -1,16 +1,17 @@
 """Launch a tiny CPU training pipeline (2 agents, 1 evaluator, 1 trainer) for the lifecycle tests.
 
-Run as a script with the run directory as the working directory. Spawned children re-import this file as
-``__mp_main__``, so the module-level class-attribute overrides below apply in every child too.
+Run as a script with the run directory as the working directory. The search budget and paths travel to the
+children inside the pickled process objects, via the TrainingConfig passed to create_agents.
 """
 import argparse
 import multiprocessing as mp
+import os
 import sys
 
 from neural_nets.conv_net import ChessNet
 from parallel_train import run_pipeline
 from util import queues
-from zero_style_chess_engine.parallel_game_tree import GameTree
+from util.config import TrainingConfig
 from zero_style_chess_engine.trainer import TrainingProcess
 
 NUM_AGENTS = 2
@@ -20,10 +21,7 @@ FAULT_AFTER_ITERATIONS = 50
 TRAINING_BATCH_SIZE = 4
 WEIGHTS_UPDATE_FREQUENCY = 2
 SHUTDOWN_TIMEOUT_SECONDS = 30.
-
-# Curriculum puzzles need a hardcoded data path until Phase 3; a tiny search budget keeps moves fast on CPU
-GameTree.curiculum = False
-GameTree.sims = 16
+TINY_SEARCH_SIMULATIONS = 16
 
 
 class TinyTrainer(TrainingProcess):
@@ -58,8 +56,11 @@ def main() -> None:
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=args.run_dir)
     chess_net.share_memory()
 
-    sys.exit(run_pipeline(args.run_dir, chess_net, NUM_AGENTS, NUM_EVALUATORS, NUM_TRAINERS,
-                          shutdown_timeout=SHUTDOWN_TIMEOUT_SECONDS))
+    # A tiny search budget keeps moves fast on CPU; no curriculum or expert data, generated data kept in the run dir
+    config = TrainingConfig(num_agents=NUM_AGENTS, num_evaluators=NUM_EVALUATORS, num_trainers=NUM_TRAINERS,
+                            sims=TINY_SEARCH_SIMULATIONS, run_dir=args.run_dir,
+                            generated_data_dir=os.path.join(args.run_dir, "generated_data"))
+    sys.exit(run_pipeline(args.run_dir, chess_net, config, shutdown_timeout=SHUTDOWN_TIMEOUT_SECONDS))
 
 
 if __name__ == "__main__":

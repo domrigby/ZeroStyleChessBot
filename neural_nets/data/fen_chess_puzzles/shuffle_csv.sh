@@ -1,1 +1,6 @@
-(head -n 1 /home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv && tail -n +2 /home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/lichess_db_puzzle_sorted.csv | shuf -n 10000) > sample.csv
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <input_csv> <output_csv>" >&2
+    exit 1
+fi
+
+(head -n 1 "$1" && tail -n +2 "$1" | shuf -n 10000) > "$2"

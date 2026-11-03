@@ -1,3 +1,4 @@
+import argparse
 import chess.pgn
 from enum import Enum
 from typing import List
@@ -99,5 +100,9 @@ class PGNLoader:
                 break
 
 if __name__ == "__main__":
-    pgn_loader = PGNLoader(r"/home/dom/Code/chess_bot/neural_nets/data", rejected_win_types=[WinTypes.TIME])
+    parser = argparse.ArgumentParser(description="Convert PGN files into pickled moves.")
+    parser.add_argument("pgn_dir", help="Directory containing .pgn files (output goes to <pgn_dir>/pickles).")
+    args = parser.parse_args()
+
+    pgn_loader = PGNLoader(args.pgn_dir, rejected_win_types=[WinTypes.TIME])
     print(pgn_loader.pgns)

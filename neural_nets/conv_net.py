@@ -71,10 +71,13 @@ class ChessNet(GenericNet):
         policy = policy.view(size_pre_flat)
 
         if legal_move_mask is not None:
-            policy = torch.where(legal_move_mask == 1, policy, 0)
+            # finfo.min rather than -inf: a 0 target times log_softmax(-inf) would make the cross-entropy NaN
+            policy = torch.where(legal_move_mask == 1, policy, torch.finfo(policy.dtype).min)
 
         if infering:
-            policy = torch.nn.functional.softmax(policy, dim=1)
+            # One distribution over all moves. A per-square softmax (dim=1) with the masked logits would give every
+            # square holding a legal move an equal share, whatever the network's logits
+            policy = torch.nn.functional.softmax(policy.view(policy.size(0), -1), dim=1).view(size_pre_flat)
 
         return value, policy
 

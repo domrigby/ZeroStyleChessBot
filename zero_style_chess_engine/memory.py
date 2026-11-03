@@ -4,6 +4,7 @@ from enum import Enum
 import pickle as pkl
 from datetime import datetime
 import glob, os
+import warnings
 
 class Turn(Enum):
     BLACK = 'black'
@@ -18,15 +19,11 @@ class DataPoint:
         self.win_val: float = win_val
         self.player: str = state.split()[1]
 
-        # probs = np.array(probs)
-        # entropy = -np.sum(probs * np.log(probs, where=(probs > 0), out=np.zeros_like(probs)))
-        # print(f"Entropy = {entropy}")
-        # print(probs)
-
 
 class Memory:
 
-    def __init__(self, length_buffer, expert_data_path: str = None, num_agents: int = 1, ):
+    def __init__(self, length_buffer, expert_data_path: str = None, num_agents: int = 1,
+                 generated_data_dir: str = "neural_nets/generated_data"):
 
         # Save the states. A ring buffer: once full, self.index is the oldest entry, overwritten next
         self.data: List[DataPoint] = []
@@ -42,6 +39,7 @@ class Memory:
         self.games_played: int = 0
 
         self.max_len: int = length_buffer
+        self.generated_data_dir: str = generated_data_dir
 
         self.last_moves: Dict[int, Optional[DataPoint]] = {}
         for agent_num in range(num_agents):
@@ -49,8 +47,10 @@ class Memory:
 
         # Deal with expert data
         self.expert_data = []
-        if expert_data_path is not None:
+        if expert_data_path is not None and os.path.isdir(expert_data_path):
             self.load_expert_data(expert_data_path)
+        elif expert_data_path is not None:
+            warnings.warn(f"Expert data directory {expert_data_path} not found: training on self-play data only")
 
         #  Load data from previous games
         self.load_directory()
@@ -162,8 +162,7 @@ class Memory:
         Function loads data from previous runs: the most recent files, up to max_len data points
         :return:
         """
-        path = r"neural_nets/generated_data"
-        files = sorted(glob.glob(os.path.join(path, "*.pkl")), key=os.path.getmtime, reverse=True)
+        files = sorted(glob.glob(os.path.join(self.generated_data_dir, "*.pkl")), key=os.path.getmtime, reverse=True)
 
         newest_first: List[List[DataPoint]] = []
         num_loaded = 0
@@ -184,7 +183,7 @@ class Memory:
         if file_path is None:
             now = datetime.now()
             time_string = now.strftime("data_at%Y%m%d_%H%M%S")
-            file_path = f"neural_nets/generated_data/{time_string}_len_{len(self.unsaved_data)}.pkl"
+            file_path = os.path.join(self.generated_data_dir, f"{time_string}_len_{len(self.unsaved_data)}.pkl")
         if os.path.dirname(file_path):
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, 'wb') as f:

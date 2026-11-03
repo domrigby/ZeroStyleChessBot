@@ -76,3 +76,13 @@ def test_undelivered_update_is_replaced_by_the_newest(make_trainer) -> None:
     assert len(delivered) == 1
     for name, tensor in trainer.neural_net.state_dict().items():
         assert torch.equal(delivered[0][name], tensor.cpu())
+
+
+def test_scheduler_learning_rate_changes_when_the_optimiser_steps(make_trainer) -> None:
+    weights_update_freq = 100
+    trainer = make_trainer([], weights_update_freq)
+    initial_learning_rate = trainer.neural_net.scheduler.get_last_lr()[0]
+
+    trainer.train_neural_network()
+
+    assert trainer.neural_net.scheduler.get_last_lr()[0] != initial_learning_rate

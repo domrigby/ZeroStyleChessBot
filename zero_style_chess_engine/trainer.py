@@ -23,7 +23,7 @@ class TrainingProcess(Process):
     def __init__(self, save_dir: str, neural_net: ChessNet, experience_queues: List[Queue] = None, weights_queues: List[Queue] = None,
                  batch_size: int = 1024, minibatch_size: int = 32, min_num_batches_to_train: int = 128, num_agents: int = 1, data_queue: Queue = None, load_path: str = None,
                  weights_update_freq: int = 100, expert_ratio: float = 0.9, expert_ratio_decay_rate: float = 0.995, update_period: int = 25,
-                 stop_event: Event = None):
+                 stop_event: Event = None, generated_data_dir: str = "neural_nets/generated_data"):
         """
         :param queue: queue from the tree search
         :param lock:
@@ -56,7 +56,8 @@ class TrainingProcess(Process):
         self.neural_net: GenericNet = neural_net
 
         # Initialise the memory... this handles all the experiences
-        self.memory = Memory(1000000, num_agents=num_agents, expert_data_path=load_path)
+        self.memory = Memory(1000000, num_agents=num_agents, expert_data_path=load_path,
+                             generated_data_dir=generated_data_dir)
 
         #  Set up loss plotting windows
         self.value_loss_window = np.zeros(self.update_period)
@@ -171,12 +172,13 @@ class TrainingProcess(Process):
             # Every N gradients we actually step the optimiser
             torch.nn.utils.clip_grad_norm_(self.neural_net.parameters(), max_norm=1.0)
             self.neural_net.optimiser.step()
+            self.neural_net.scheduler.step()
             self.neural_net.optimiser.zero_grad()
 
         #  Store some values for plotting
-        self.value_loss_window[self.training_count % self.update_period] = value_loss
-        self.pol_loss_window[self.training_count % self.update_period] = pol_loss
-        self.total_loss_window[self.training_count % self.update_period] = total_loss
+        self.value_loss_window[self.training_count % self.update_period] = value_loss.item()
+        self.pol_loss_window[self.training_count % self.update_period] = pol_loss.item()
+        self.total_loss_window[self.training_count % self.update_period] = total_loss.item()
 
         self.training_count += 1
 
@@ -196,18 +198,3 @@ class TrainingProcess(Process):
                 except Empty:
                     pass  # the evaluator took it in the meantime
                 queue.put_nowait(weights)
-
-if __name__ == "__main__":
-    from multiprocessing import Queue
-
-    chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32, init_lr=0.001)
-    training_data_queue = Queue()
-
-    trainer = TrainingProcess(save_dir="/home/dom/Code/chess_bot/sessions/run_at_20250218_220245",
-                              neural_net=chess_net, experience_queues=[Queue()], batch_size=128,
-                              num_agents=1, data_queue=Queue(), load_path="/home/dom/1TB_drive/chess_data")
-
-    trainer.games_played = 100000
-
-    while True:
-        trainer.memory.get_batch(32, 1.)

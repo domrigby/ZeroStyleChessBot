@@ -1,39 +1,50 @@
+import argparse
 import pickle
 import numpy as np
 import os
 import glob
 import matplotlib.pyplot as plt
 
-moves_dir = r"/home/dom/Code/chess_bot/neural_nets/data/real_moves/0"
 
-moves = glob.glob(moves_dir + "/*")
+def main():
+    parser = argparse.ArgumentParser(description="Plot the distribution of winners across pickled moves.")
+    parser.add_argument("moves_dir", help="Directory of pickled moves.")
+    args = parser.parse_args()
 
-winners = np.zeros(len(moves))
+    moves_dir = args.moves_dir
 
-for idx, move in enumerate(moves):
+    moves = glob.glob(moves_dir + "/*")
 
-    with open(move, 'rb') as f:
-        data = pickle.load(f)
+    winners = np.zeros(len(moves))
 
-    winner = data["winner"]
+    for idx, move in enumerate(moves):
 
-    if winner == "white":
-        winners[idx] = 1
-    elif winner == "black":
-        winners[idx] = -1
-    else:
-        winners[idx] = 0
+        with open(move, 'rb') as f:
+            data = pickle.load(f)
 
-# Count occurrences of each unique value
-values, counts = np.unique(winners, return_counts=True)
+        winner = data["winner"]
 
-# Plot the histogram as a bar chart
-plt.bar(values, counts, tick_label=values, color=['red', 'blue', 'green'])
+        if winner == "white":
+            winners[idx] = 1
+        elif winner == "black":
+            winners[idx] = -1
+        else:
+            winners[idx] = 0
 
-# Label axes and title
-plt.xlabel('Value')
-plt.ylabel('Count')
-plt.title('Histogram of -1, 0, 1')
+    # Count occurrences of each unique value
+    values, counts = np.unique(winners, return_counts=True)
 
-# Show the plot
-plt.show()
+    # Plot the histogram as a bar chart
+    plt.bar(values, counts, tick_label=values, color=['red', 'blue', 'green'])
+
+    # Label axes and title
+    plt.xlabel('Value')
+    plt.ylabel('Count')
+    plt.title('Histogram of -1, 0, 1')
+
+    # Show the plot
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

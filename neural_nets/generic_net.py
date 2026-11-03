@@ -100,17 +100,14 @@ class GenericNet(nn.Module):
 
         if len(moves) > 1:
             for legal_move in moves:
-                # Ignore pawn promotions for now
-                if len(str(legal_move)) < 5:
-                    if team == "black":
-                        legal_move_str = chess_engine.unflip_move(str(legal_move))
-                        indices = chess_engine.move_to_target_indices(legal_move_str)
-                    else:
-                        indices = chess_engine.move_to_target_indices(str(legal_move))
+                if team == "black":
+                    legal_move_str = chess_engine.unflip_move(str(legal_move))
+                    indices = chess_engine.move_to_target_indices(legal_move_str)
+                else:
+                    indices = chess_engine.move_to_target_indices(str(legal_move))
 
-
-                    all_indices.append(indices)
-                    move_to_indices_lookup.append([legal_move, indices])
+                all_indices.append(indices)
+                move_to_indices_lookup.append([legal_move, indices])
 
             if all_indices:  # only if we have legal moves
                 idx_tensor = torch.tensor(all_indices, dtype=torch.long)  # (N,3)
@@ -136,48 +133,6 @@ class GenericNet(nn.Module):
         fen = board.fen()
         return chess_engine.fen_to_tensor(fen)
 
-    def node_evaluation(self, node):
-
-        self.eval()
-        with torch.no_grad():
-            legal_move_mask, index_map = self.create_legal_move_mask(node.moves, node.team)
-            board_tensor = chess_engine.fen_to_tensor(node.state)
-            value, policy = self(torch.tensor(board_tensor, dtype=torch.float32, device='cuda').unsqueeze(0),
-                                      legal_move_mask)
-
-        # Define the alpha parameter for Dirichlet distribution and the weighting factor
-        alpha = 0.3  # You can adjust this value depending on your needs
-        epsilon = 0.25  # Weight for blending original policy and noise
-
-        # Assosciate probability with its move
-        for move, index in index_map:
-            move.P = policy[0][index]
-
-        Ps = np.array([move.P.cpu().item() if torch.is_tensor(move.P) else move.P for move in node.moves])
-
-        sum_Ps = np.sum(Ps)
-
-        if sum_Ps <= 1e-6:
-            Ps = np.ones_like(Ps) / len(Ps)
-            sum_Ps = np.sum(Ps)
-
-        # Generate Dirichlet noise
-        dirichlet_noise = np.random.dirichlet([alpha] * len(Ps))
-
-        Ps = (1-epsilon) * Ps / sum_Ps + epsilon * dirichlet_noise
-
-        for idx, move in enumerate(node.moves):
-            move.P  = Ps[idx]
-
-        if sum([move.P.cpu().item() if torch.is_tensor(move.P) else move.P for move in node.moves]) < 0.95:
-            print(f"In tree: {sum([move.P.cpu().item() if torch.is_tensor(move.P) else move.P for move in node.moves])}")
-
-        # Set flag saying it has been processed
-        node.awaiting_processing = False
-
-        # Return value for backpropagation
-        return value.cpu().item()
-
     def tensorise_batch(self, states, moves, probabilities, wins):
         state_tens, legal_move_mask, _ = self.tensorise_inputs(states, moves)
 
@@ -193,13 +148,13 @@ class GenericNet(nn.Module):
         batch_indices = np.empty(num_moves, dtype=np.int64)
 
         index = 0
-        for idx, (move_set, prob_set) in enumerate(zip(moves, probabilities)):
+        for idx, (state, move_set, prob_set) in enumerate(zip(states, moves, probabilities)):
+            # The board is seen from the player to move, so black's targets are flipped like its legal move mask
+            black_to_move = state.split()[1] == 'b'
             for move, prob in zip(move_set, prob_set):
-                all_indices[index] = chess_engine.move_to_target_indices(str(move))  # Vectorized storage
-                try:
-                    all_probs[index] = prob
-                except:
-                    print(move, prob, move_set, prob_set)
+                move_str = chess_engine.unflip_move(str(move)) if black_to_move else str(move)
+                all_indices[index] = chess_engine.move_to_target_indices(move_str)  # Vectorized storage
+                all_probs[index] = prob
                 batch_indices[index] = idx
                 index += 1  # Move to next position
 

@@ -1,12 +1,9 @@
+import argparse
 import os
 import pickle
 import random
 
-SOURCE_DIR = "/home/dom/1TB_drive/chess_data"      # Replace with the path to your existing files
-DEST_DIR = "/home/dom/1TB_drive/new_data"         # Replace with the desired output directory
 MAX_SIZE = 250_000                   # Max entries per file
-
-os.makedirs(DEST_DIR, exist_ok=True)
 
 def load_pickle(file_path):
     with open(file_path, "rb") as f:
@@ -17,6 +14,16 @@ def save_pickle(data, file_path):
         pickle.dump(data, f)
 
 def main():
+    parser = argparse.ArgumentParser(description="Shuffle test_moves_*.pkl files into new chunks.")
+    parser.add_argument("source_dir", help="Directory containing the existing test_moves_*.pkl files.")
+    parser.add_argument("dest_dir", help="Directory to write the shuffled files to.")
+    args = parser.parse_args()
+
+    SOURCE_DIR = args.source_dir
+    DEST_DIR = args.dest_dir
+
+    os.makedirs(DEST_DIR, exist_ok=True)
+
     buffer = []
     file_counter = 0
 

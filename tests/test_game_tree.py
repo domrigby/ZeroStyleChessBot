@@ -8,10 +8,8 @@ from zero_style_chess_engine.parallel_game_tree import GameTree, Node
 
 
 @pytest.fixture
-def game_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> GameTree:
-    # The curriculum needs puzzle data from a hardcoded path until Phase 3
-    monkeypatch.setattr(GameTree, "curiculum", False)
-    return GameTree(save_dir=str(tmp_path), multiprocess=True, experience_queue=queue.Queue())
+def game_tree(tmp_path: Path) -> GameTree:
+    return GameTree(save_dir=str(tmp_path), experience_queue=queue.Queue())
 
 
 def _optimal_line(root: Node, depth: int) -> Node:

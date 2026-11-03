@@ -866,7 +866,7 @@ private:
         for (int i = 0; i < PIECE_NB; ++i) {
             occupancy |= bitboards[i];
             // Pieces with index >= BLACK_KING are black
-            if (white_to_move ? i >= BLACK_KING : i < WHITE_PAWN)
+            if (white_to_move ? i >= BLACK_KING : i <= WHITE_PAWN)
                 enemyOccupancy |= bitboards[i];
         }
 

@@ -1,3 +1,4 @@
+import argparse
 import sys
 import math
 import threading
@@ -9,6 +10,11 @@ import chess.engine
 from zero_style_chess_engine.engine_interface import EngineInterface
 
 if __name__=="__main__":
+
+    parser = argparse.ArgumentParser(description="Watch the network play Stockfish.")
+    parser.add_argument("--stockfish_path", type=str, required=True,
+                        help="Path to the Stockfish binary.")
+    args = parser.parse_args()
 
     import multiprocessing as mp
 
@@ -42,7 +48,7 @@ if __name__=="__main__":
     )
 
     # Stockfish (Black).  Adjust to your binary path:
-    SF_PATH = "/home/dom/stockfish/stockfish-ubuntu-x86-64-avx2"
+    SF_PATH = args.stockfish_path
     sf_engine = chess.engine.SimpleEngine.popen_uci(SF_PATH)
     # Optionally cap strength:
     sf_engine.configure({

@@ -1,103 +1,108 @@
 # Lichess puzzles start after one move. We therefore have to apply the first move to get a proper dataset
 
+import argparse
+import glob
 import chess_moves
 import pandas as pd
 import pickle as pkl
 import numpy as np
 
-csv = pd.read_csv("/home/dom/1TB_drive/lichess_db_puzzle_sorted.csv")
 
-board = chess_moves.ChessEngine()
+def main():
+    parser = argparse.ArgumentParser(description="Apply the first move of each Lichess puzzle and append the positions to existing train/test pickles.")
+    parser.add_argument("csv_path", help="Path to the sorted Lichess puzzle CSV.")
+    parser.add_argument("data_dir", help="Directory containing train*.pkl and test*.pkl files to append to.")
+    args = parser.parse_args()
 
-num = len(csv)
-count = 0
-train_moves = []
-test_moves = []
+    csv = pd.read_csv(args.csv_path)
 
-for rows in csv.iterrows():
-    fen = rows[1]['FEN']
-    moves = rows[1]['Moves'].split()
+    board = chess_moves.ChessEngine()
 
-    # Select a move at random to add to the data set, not the first because thats a bad move
-    move_to_include = np.random.choice(moves[1:])
+    num = len(csv)
+    count = 0
+    train_moves = []
+    test_moves = []
 
-    loser = fen.split()[1]
-    if 'opening' in rows[1]['Themes']:
-        win_val = 0
-    else:
-        win_val = 1
+    for rows in csv.iterrows():
+        fen = rows[1]['FEN']
+        moves = rows[1]['Moves'].split()
 
-    train = np.random.random() < 0.9
+        # Select a move at random to add to the data set, not the first because thats a bad move
+        move_to_include = np.random.choice(moves[1:])
 
-    for idx in range(len(moves) - 1):
-        try:
-            fen = board.push(fen, moves[idx])
-        except RuntimeError:
-            print('Skipping')
-            break
+        loser = fen.split()[1]
+        if 'opening' in rows[1]['Themes']:
+            win_val = 0
+        else:
+            win_val = 1
 
-        player = fen.split()[1]
+        train = np.random.random() < 0.9
 
-        win = win_val if player != loser else -win_val
+        for idx in range(len(moves) - 1):
+            try:
+                fen = board.push(fen, moves[idx])
+            except RuntimeError:
+                print('Skipping')
+                break
 
-        new_dp = {'fen': fen, 'moves': moves[idx + 1], 'value': win}
+            player = fen.split()[1]
 
-        if moves[idx] == move_to_include:
-            if train:
-                train_moves.append(new_dp)
-            else:
-                test_moves.append(new_dp)
-            # Continue to next move
-            break
+            win = win_val if player != loser else -win_val
 
-    count += 1
-    print(f"{100*count/num:.3f}% done. ({count}/{num}) Training moves: {len(train_moves)} Test moves:{len(test_moves)}")
+            new_dp = {'fen': fen, 'moves': moves[idx + 1], 'value': win}
 
-# with open(f'/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/pickled_data/training_moves.pkl', 'wb') as f:
-#     pkl.dump(train_moves, f)
-#
-# with open('/home/dom/Code/chess_bot/neural_nets/data/fen_chess_puzzles/pickled_data/test_moves.pkl', 'wb') as f:
-#     np.random.shuffle(test_moves)
-#     pkl.dump(test_moves, f)
+            if moves[idx] == move_to_include:
+                if train:
+                    train_moves.append(new_dp)
+                else:
+                    test_moves.append(new_dp)
+                # Continue to next move
+                break
 
-import glob
-appending_to = "/home/dom/1TB_drive/chess_data"
-train_files = glob.glob(appending_to + "/train*.pkl")
+        count += 1
+        print(f"{100*count/num:.3f}% done. ({count}/{num}) Training moves: {len(train_moves)} Test moves:{len(test_moves)}")
 
-chunk_size = int(len(train_moves) / len(train_files))
+    appending_to = args.data_dir
+    train_files = glob.glob(appending_to + "/train*.pkl")
 
-#  Shuffle first
-np.random.shuffle(train_moves)
+    chunk_size = int(len(train_moves) / len(train_files))
 
-for chunk_idx, file in enumerate(train_files):
-    with open(file, 'rb') as f:
-        moves = pkl.load(f)
+    #  Shuffle first
+    np.random.shuffle(train_moves)
 
-    lb = chunk_idx * chunk_size
-    ub = min((chunk_idx + 1) * chunk_size, len(train_moves) + 1)
+    for chunk_idx, file in enumerate(train_files):
+        with open(file, 'rb') as f:
+            moves = pkl.load(f)
 
-    moves.extend(train_moves[lb:ub])
+        lb = chunk_idx * chunk_size
+        ub = min((chunk_idx + 1) * chunk_size, len(train_moves) + 1)
 
-    with open(file, 'wb') as f:
-        pkl.dump(moves, f)
+        moves.extend(train_moves[lb:ub])
 
-    print(f"{file} complete. Extended by ")
+        with open(file, 'wb') as f:
+            pkl.dump(moves, f)
 
-test_files = glob.glob(appending_to + "/test*.pkl")
+        print(f"{file} complete. Extended by ")
 
-chunk_size = int(len(test_moves) / len(test_files))
+    test_files = glob.glob(appending_to + "/test*.pkl")
 
-#  Shuffle first
-np.random.shuffle(test_moves)
+    chunk_size = int(len(test_moves) / len(test_files))
 
-for chunk_idx, file in enumerate(test_files):
-    with open(file, 'rb') as f:
-        moves = pkl.load(f)
+    #  Shuffle first
+    np.random.shuffle(test_moves)
 
-    lb = chunk_idx * chunk_size
-    ub = max((chunk_idx + 1) * chunk_size, len(test_moves) + 1)
+    for chunk_idx, file in enumerate(test_files):
+        with open(file, 'rb') as f:
+            moves = pkl.load(f)
 
-    moves.extend(test_moves[lb:ub])
+        lb = chunk_idx * chunk_size
+        ub = max((chunk_idx + 1) * chunk_size, len(test_moves) + 1)
 
-    with open(file, 'wb') as f:
-        pkl.dump(moves, f)
+        moves.extend(test_moves[lb:ub])
+
+        with open(file, 'wb') as f:
+            pkl.dump(moves, f)
+
+
+if __name__ == "__main__":
+    main()
