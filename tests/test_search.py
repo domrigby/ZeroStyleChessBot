@@ -1,8 +1,11 @@
 import multiprocessing.queues
 import queue
 from pathlib import Path
-from typing import Any, Iterator, List, Tuple, cast
+from typing import Any, Iterator, Tuple, cast
 
+import numpy as np
+
+from zero_style_chess_engine.messages import EvalRequest, EvalResult
 from zero_style_chess_engine.parallel_game_tree import GameTree, Node
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -23,10 +26,10 @@ class InstantEvaluator:
         self.results_queue = results_queue
         self.requests_answered = 0
 
-    def put(self, request: Tuple[int, int, str, List[str]]) -> None:
-        _, node_id, _, legal_moves = request
-        uniform_priors = [[move, 1.0 / len(legal_moves)] for move in legal_moves] if legal_moves else []
-        self.results_queue.put([(node_id, 0.0, uniform_priors, None)])
+    def put(self, request: EvalRequest) -> None:
+        num_moves = len(request.legal_moves)
+        uniform_priors = np.full(num_moves, 1.0 / num_moves) if num_moves else np.zeros(0)
+        self.results_queue.put([EvalResult(request.node_id, 0.0, uniform_priors)])
         self.requests_answered += 1
 
 
@@ -36,8 +39,8 @@ def _make_tree(tmp_path: Path, start_state: str) -> Tuple[GameTree, InstantEvalu
     evaluator = InstantEvaluator(results_queue)
     tree = GameTree(
         save_dir=str(tmp_path),
-        process_queue=cast(multiprocessing.queues.Queue, evaluator),
-        results_queue=cast(multiprocessing.queues.Queue, results_queue),
+        eval_request_queue=cast(multiprocessing.queues.Queue, evaluator),
+        eval_result_queue=cast(multiprocessing.queues.Queue, results_queue),
         start_state=start_state,
     )
     return tree, evaluator

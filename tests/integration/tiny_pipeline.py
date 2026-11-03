@@ -14,7 +14,7 @@ from neural_nets.conv_net import ChessNet
 from parallel_train import run_pipeline
 from util import queues
 from util.config import TrainingConfig
-from zero_style_chess_engine.trainer import TrainingProcess
+from zero_style_chess_engine.trainer import Trainer
 
 NUM_AGENTS = 2
 NUM_EVALUATORS = 1
@@ -26,7 +26,7 @@ SHUTDOWN_TIMEOUT_SECONDS = 30.0
 TINY_SEARCH_SIMULATIONS = 16
 
 
-class TinyTrainer(TrainingProcess):
+class TinyTrainer(Trainer):
     """Trains on tiny batches so a short CPU run exercises training and weight pushes."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -56,7 +56,7 @@ def main() -> None:
 
     mp.set_start_method("spawn", force=True)
 
-    setattr(queues, "TrainingProcess", FaultyTrainer if args.inject_fault else TinyTrainer)
+    setattr(queues, "Trainer", FaultyTrainer if args.inject_fault else TinyTrainer)
 
     chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=1, save_dir=args.run_dir)
     chess_net.share_memory()

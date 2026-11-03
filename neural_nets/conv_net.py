@@ -80,10 +80,6 @@ class ChessNet(GenericNet):
 
         size_pre_flat = policy.size()
 
-        policy = policy.view(policy.size(0), -1)
-
-        policy = policy.view(size_pre_flat)
-
         if legal_move_mask is not None:
             # finfo.min rather than -inf: a 0 target times log_softmax(-inf) would make the cross-entropy NaN
             policy = torch.where(legal_move_mask == 1, policy, torch.finfo(policy.dtype).min)

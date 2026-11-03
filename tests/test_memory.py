@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from zero_style_chess_engine.memory import DataPoint, Memory
+from zero_style_chess_engine.messages import GameRecord, PositionRecord
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 GENERATED_DATA_DIRECTORY = "neural_nets/generated_data"
@@ -20,11 +21,11 @@ def _start_position_moves() -> List[str]:
     return engine.legal_moves()
 
 
-def _game(length: int) -> List[dict]:
+def _game(length: int) -> GameRecord:
     """A fake game of identical start positions with spread-out visit counts (non-zero entropy)."""
     moves = _start_position_moves()
     visit_counts = np.arange(1, len(moves) + 1)
-    return [{"state": START_FEN, "moves": moves, "visit_counts": visit_counts, "value": 0} for _ in range(length)]
+    return GameRecord(0, [PositionRecord(START_FEN, moves, visit_counts, 0) for _ in range(length)])
 
 
 @pytest.fixture
@@ -39,7 +40,7 @@ def test_pickled_data_point_has_no_back_reference_to_its_game(empty_memory_direc
     standalone = DataPoint(START_FEN, _start_position_moves(), [0.05] * 20)
     memory = Memory(length_buffer=100)
 
-    memory.save_game_to_memory(_game(game_length), agent_id=0)
+    memory.save_game_to_memory(_game(game_length))
 
     for data_point in memory.data:
         assert not hasattr(data_point, "parent_datapoint")
@@ -60,7 +61,7 @@ def test_buffer_never_exceeds_max_len(empty_memory_directory: Path, max_len: int
     memory = Memory(length_buffer=max_len)
 
     for _ in range(num_games):
-        memory.save_game_to_memory(_game(game_length), agent_id=0)
+        memory.save_game_to_memory(_game(game_length))
         assert len(memory) <= max_len
 
     assert len(memory) == max_len
@@ -82,7 +83,7 @@ def test_get_batch_returns_requested_size_without_expert_data(empty_memory_direc
     batch_size = 8
     expert_ratio = 0.9
     memory = Memory(length_buffer=100)
-    memory.save_game_to_memory(_game(10), agent_id=0)
+    memory.save_game_to_memory(_game(10))
 
     states, moves, probs, wins = memory.get_batch(batch_size, expert_ratio)
 
@@ -117,9 +118,9 @@ def test_save_data_writes_only_unsaved_data_points(empty_memory_directory: Path)
     first_file = "first.pkl"
     second_file = "second.pkl"
 
-    memory.save_game_to_memory(_game(game_length), agent_id=0)
+    memory.save_game_to_memory(_game(game_length))
     memory.save_data(first_file)
-    memory.save_game_to_memory(_game(game_length), agent_id=0)
+    memory.save_game_to_memory(_game(game_length))
     memory.save_data(second_file)
 
     for file_name in (first_file, second_file):
@@ -141,10 +142,10 @@ def test_game_with_zero_entropy_is_sampled_uniformly(
     moves = _start_position_moves()
     visit_counts = np.zeros(len(moves))
     visit_counts[0] = 1
-    game = [{"state": START_FEN, "moves": moves, "visit_counts": visit_counts, "value": 0} for _ in range(game_length)]
+    game = GameRecord(0, [PositionRecord(START_FEN, moves, visit_counts, 0) for _ in range(game_length)])
     memory = Memory(length_buffer=100)
 
-    memory.save_game_to_memory(game, agent_id=0)
+    memory.save_game_to_memory(game)
 
     assert len(memory.data) == expected_saved
 

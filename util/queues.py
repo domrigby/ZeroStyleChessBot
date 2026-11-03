@@ -6,8 +6,8 @@ from neural_nets.conv_net import ChessNet
 from neural_nets.data.fen_chess_puzzles.curriculum import load_curricula
 from util.config import TrainingConfig
 from zero_style_chess_engine.parallel_game_tree import GameTree
-from zero_style_chess_engine.evaluator import NeuralNetHandling
-from zero_style_chess_engine.trainer import TrainingProcess
+from zero_style_chess_engine.evaluator import Evaluator
+from zero_style_chess_engine.trainer import Trainer
 
 
 def create_agents(
@@ -22,7 +22,7 @@ def create_agents(
     inference_mode_queue: Optional[Queue] = None,
     send_results_queue: Optional[List[Queue]] = None,
     config: Optional[TrainingConfig] = None,
-) -> Tuple[List[GameTree], List[NeuralNetHandling], List[TrainingProcess], Dict[str, List[Queue]], synchronize.Event]:
+) -> Tuple[List[GameTree], List[Evaluator], List[Trainer], Dict[str, List[Queue]], synchronize.Event]:
     """
     This function initialises all the agents and strings and distributes the queues accordingly
     TOOD: get rid of this
@@ -32,7 +32,7 @@ def create_agents(
     :param network: the neural network being used
     :param start_state
     :param config: paths and search/training knobs; defaults to TrainingConfig()
-    :return: agents, evaluators, trainers, data queues for the supervisor, and the stop event shared by every
+    :return: agents, evaluators, trainers, stats queues for the supervisor, and the stop event shared by every
         process (set it to make them all shut down)
     """
 
@@ -46,10 +46,10 @@ def create_agents(
 
     # Start initializing stuff
     agents: List[GameTree] = []
-    results_queue_dicts: Dict[int, Queue] = {}
-    process_queues: List[List[Queue]] = [[] for _ in range(num_evaluators)]
-    training_queues: List[List[Queue]] = [[] for _ in range(num_trainers)]
-    data_queues: Dict[str, List[Queue]] = {"agents": [], "training": []}
+    eval_result_queues: Dict[int, Queue] = {}
+    eval_request_queues: List[List[Queue]] = [[] for _ in range(num_evaluators)]
+    game_record_queues: List[List[Queue]] = [[] for _ in range(num_trainers)]
+    stats_queues: Dict[str, List[Queue]] = {"agents": [], "training": []}
     stop_event = Event()
 
     # One weights queue per evaluator so every evaluator receives every update. maxsize=1: the trainer replaces an
@@ -60,21 +60,21 @@ def create_agents(
     curricula = load_curricula(config.curriculum_csv_path if training else None, num_agents)
 
     for idx in range(num_agents):
-        process_queue: Queue = Queue()
-        results_queue: Queue = Queue()
+        eval_request_queue: Queue = Queue()
+        eval_result_queue: Queue = Queue()
 
-        # Create data queue
-        agent_data_queue: Queue = Queue()
-        data_queues["agents"].append(agent_data_queue)
+        # Create stats queue
+        agent_stats_queue: Queue = Queue()
+        stats_queues["agents"].append(agent_stats_queue)
 
-        process_queues[int(idx // agents_per_evaluator)].append(process_queue)
+        eval_request_queues[int(idx // agents_per_evaluator)].append(eval_request_queue)
 
-        training_queue: Optional[Queue]
+        game_record_queue: Optional[Queue]
         if num_trainers:
-            training_queue = Queue()
-            training_queues[int(idx // agents_per_trainer)].append(training_queue)
+            game_record_queue = Queue()
+            game_record_queues[int(idx // agents_per_trainer)].append(game_record_queue)
         else:
-            training_queue = None
+            game_record_queue = None
 
         send_queue: Optional[Queue]
         if inference_mode_queue and send_results_queue:
@@ -86,11 +86,12 @@ def create_agents(
 
         agent = GameTree(
             save_dir=save_dir,
+            agent_id=idx,
             training=training,
-            process_queue=process_queue,
-            experience_queue=training_queue,
-            results_queue=results_queue,
-            data_queue=agent_data_queue,
+            eval_request_queue=eval_request_queue,
+            game_record_queue=game_record_queue,
+            eval_result_queue=eval_result_queue,
+            stats_queue=agent_stats_queue,
             start_state=start_state,
             verbose=verbose,
             inference_mode=inference_mode,
@@ -100,40 +101,41 @@ def create_agents(
             sims=config.sims,
             maximum_lag=config.maximum_lag,
             curriculum=curricula[idx],
+            search_config=config.search,
         )
 
         agents.append(agent)
-        results_queue_dicts[agent.agent_id] = results_queue
+        eval_result_queues[agent.agent_id] = eval_result_queue
 
     # Evaluator
-    evaluators: List[NeuralNetHandling] = []
+    evaluators: List[Evaluator] = []
     for idx in range(num_evaluators):
         # Each evaluator gets its own copy. Spawn pickling would otherwise put the trainer's and evaluators' parameters
         # in the same shared storage, so an evaluator's load_state_dict would roll back the trainer's weights.
         # TODO: costs one weights copy per evaluator. For large nets, replace with a single inference copy shared by all
         #  evaluators, which the trainer copies its weights into every weights_update_freq steps under an mp.Lock.
-        evaluator = NeuralNetHandling(
+        evaluator = Evaluator(
             neural_net=copy.deepcopy(network),
-            process_queues=process_queues[idx],
+            eval_request_queues=eval_request_queues[idx],
             weights_queue=weights_queues[idx],
-            results_queue_dict=results_queue_dicts,
+            eval_result_queues=eval_result_queues,
             batch_size=config.evaluator_batch_size,
             stop_event=stop_event,
         )
         evaluators.append(evaluator)
 
-    trainers: List[TrainingProcess] = []
+    trainers: List[Trainer] = []
     for idx in range(num_trainers):
-        training_data_queue: Queue = Queue()
-        data_queues["training"].append(training_data_queue)
+        trainer_stats_queue: Queue = Queue()
+        stats_queues["training"].append(trainer_stats_queue)
         trainers.append(
-            TrainingProcess(
+            Trainer(
                 save_dir=save_dir,
                 neural_net=network,
-                experience_queues=training_queues[idx],
+                game_record_queues=game_record_queues[idx],
                 batch_size=config.trainer_batch_size,
                 num_agents=num_agents,
-                data_queue=training_data_queue,
+                stats_queue=trainer_stats_queue,
                 weights_queues=weights_queues,
                 min_num_batches_to_train=1,
                 load_path=config.expert_data_path,
@@ -143,4 +145,4 @@ def create_agents(
             )
         )
 
-    return agents, evaluators, trainers, data_queues, stop_event
+    return agents, evaluators, trainers, stats_queues, stop_event

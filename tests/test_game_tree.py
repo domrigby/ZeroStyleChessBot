@@ -1,19 +1,20 @@
 import multiprocessing.queues
 import queue
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, List, cast
 
 import chess_moves
 import pytest
 
+from zero_style_chess_engine.messages import PositionRecord
 from zero_style_chess_engine.parallel_game_tree import GameTree, Node
 
 
 @pytest.fixture
 def game_tree(tmp_path: Path) -> GameTree:
     # A thread queue stands in for the multiprocessing queue: same put/get interface, no feeder thread delay
-    experience_queue: "queue.Queue[Any]" = queue.Queue()
-    return GameTree(save_dir=str(tmp_path), experience_queue=cast(multiprocessing.queues.Queue, experience_queue))
+    game_record_queue: "queue.Queue[Any]" = queue.Queue()
+    return GameTree(save_dir=str(tmp_path), game_record_queue=cast(multiprocessing.queues.Queue, game_record_queue))
 
 
 def _optimal_line(root: Node, depth: int) -> Node:
@@ -40,12 +41,12 @@ def test_save_path_whilst_optimal_keeps_an_even_number_of_positions(
     end_node = _optimal_line(game_tree.root, depth=positions_on_path + 1)
 
     game_tree.save_path_whilst_optimal(end_node)
-    assert game_tree.experience_queue is not None
+    assert game_tree.game_record_queue is not None
 
     if expected_saved == 0:
-        assert game_tree.experience_queue.empty()
+        assert game_tree.game_record_queue.empty()
     else:
-        game_states, _ = game_tree.experience_queue.get_nowait()
+        game_states = game_tree.game_record_queue.get_nowait().positions
         assert len(game_states) == expected_saved
 
 
@@ -78,11 +79,11 @@ def _play_scripted_game(game_tree: GameTree, moves: List[str], monkeypatch: pyte
     game_tree.train()
 
 
-def _saved_games(game_tree: GameTree) -> List[List[Dict[str, Any]]]:
-    assert game_tree.experience_queue is not None
+def _saved_games(game_tree: GameTree) -> List[List[PositionRecord]]:
+    assert game_tree.game_record_queue is not None
     games = []
-    while not game_tree.experience_queue.empty():
-        game_states, _ = game_tree.experience_queue.get_nowait()
+    while not game_tree.game_record_queue.empty():
+        game_states = game_tree.game_record_queue.get_nowait().positions
         games.append(game_states)
     return games
 
@@ -96,9 +97,9 @@ def test_played_checkmate_game_is_saved_with_outcome_values(
     games = _saved_games(game_tree)
     assert len(games) == 1
     # Every position before the mate, starting position included; black delivered mate
-    saved_positions = [(state["state"].split()[1], state["value"]) for state in games[0]]
+    saved_positions = [(state.fen.split()[1], state.value) for state in games[0]]
     assert sorted(saved_positions) == sorted([("w", LOSS_VALUE), ("b", WIN_VALUE), ("w", LOSS_VALUE), ("b", WIN_VALUE)])
-    assert game_tree.start_state in [state["state"] for state in games[0]]
+    assert game_tree.start_state in [state.fen for state in games[0]]
 
 
 def test_played_stalemate_game_is_saved_as_a_draw(game_tree: GameTree, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,4 +108,4 @@ def test_played_stalemate_game_is_saved_as_a_draw(game_tree: GameTree, monkeypat
 
     games = _saved_games(game_tree)
     assert len(games) == 1
-    assert [(state["state"], state["value"]) for state in games[0]] == [(STALEMATE_START, DRAW_VALUE)]
+    assert [(state.fen, state.value) for state in games[0]] == [(STALEMATE_START, DRAW_VALUE)]

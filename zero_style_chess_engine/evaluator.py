@@ -1,13 +1,15 @@
 from multiprocessing import Process, Queue, Event, synchronize
 from queue import Empty
-from typing import Any, List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from neural_nets.conv_net import ChessNet
+from zero_style_chess_engine.messages import EvalRequest, EvalResult
 import contextlib
 import time
+import numpy as np
 import torch
 
 
-class NeuralNetHandling(Process):
+class Evaluator(Process):
     """This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
 
     idle_sleep_seconds = 0.001
@@ -15,9 +17,9 @@ class NeuralNetHandling(Process):
     def __init__(
         self,
         neural_net: ChessNet,
-        process_queues: Optional[List[Queue]] = None,
+        eval_request_queues: Optional[List[Queue]] = None,
         weights_queue: Optional[Queue] = None,
-        results_queue_dict: Optional[Dict[int, Queue]] = None,
+        eval_result_queues: Optional[Dict[int, Queue]] = None,
         batch_size: int = 64,
         stop_event: Optional[synchronize.Event] = None,
     ) -> None:
@@ -26,27 +28,33 @@ class NeuralNetHandling(Process):
         :param lock:
         """
         super().__init__()
-        self.process_queue: Optional[List[Queue]] = process_queues
+        self.eval_request_queues: Optional[List[Queue]] = eval_request_queues
         self.weights_queue = weights_queue
 
-        if results_queue_dict:
-            self.results_queue = results_queue_dict
+        # Keyed by agent id
+        if eval_result_queues:
+            self.eval_result_queues = eval_result_queues
         else:
-            self.results_queue = {}
+            self.eval_result_queues = {}
 
         self.stop_event = stop_event if stop_event is not None else Event()
 
         self.batch_size = batch_size
 
         self.neural_net = neural_net
-        self.neural_net.compile()
 
         self.processed_count = 0
+
+    def setup(self) -> None:
+        """Heavy initialisation, run in the child process rather than pickled into it"""
+        self.neural_net.compile()
 
     def run(self) -> None:
         """Optimized function to process queued game states efficiently."""
 
-        if self.results_queue is None:
+        self.setup()
+
+        if self.eval_result_queues is None:
             raise ValueError("NO RESULTS QUEUE: User must provide results queue from their game tree.")
 
         stream_context = (
@@ -59,38 +67,33 @@ class NeuralNetHandling(Process):
             self.check_for_network_update()
 
         # Don't block exit flushing results to agents which have already stopped
-        for queue in self.results_queue.values():
+        for queue in self.eval_result_queues.values():
             queue.cancel_join_thread()
 
     def collect_and_process(self) -> None:
-        agent_ids: List[int] = []
-        hashes: List[int] = []
-        states: List[str] = []
-        legal_moves: List[List[str]] = []
-        assert self.process_queue is not None
+        requests: List[EvalRequest] = []
+        assert self.eval_request_queues is not None
 
         # Equal share of the batch per agent. Queue.qsize() isn't used as it raises NotImplementedError on macOS.
-        per_queue_allowance = max(1, self.batch_size // len(self.process_queue))
+        per_queue_allowance = max(1, self.batch_size // len(self.eval_request_queues))
 
-        for queue in self.process_queue:
+        for queue in self.eval_request_queues:
             for _ in range(per_queue_allowance):
                 try:
-                    agent_id, the_hash, state, legal_moves_strings = queue.get_nowait()
-                    agent_ids.append(agent_id)
-                    hashes.append(the_hash)
-                    states.append(state)
-                    legal_moves.append(legal_moves_strings)
+                    requests.append(queue.get_nowait())
                     self.processed_count += 1
 
                 except Empty:
                     break
 
-        if not hashes:
+        if not requests:
             time.sleep(self.idle_sleep_seconds)
             return
 
         # Tensorization & Inference
-        state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(states, legal_moves)
+        state_tens, legal_move_mask, legal_move_key = self.neural_net.tensorise_inputs(
+            [request.fen for request in requests], [request.legal_moves for request in requests]
+        )
 
         self.neural_net.eval()
         with torch.no_grad():  # Prevents unnecessary gradient tracking
@@ -101,16 +104,21 @@ class NeuralNetHandling(Process):
         # Another improvement was to convert whole bacth to numpy rather than using item as apparently that is slow
         values, policies = values.to("cpu", non_blocking=True).numpy(), policies.to("cpu", non_blocking=True).numpy()
 
-        batched_results: Dict[int, List[Tuple[Any, ...]]] = {agent_id: [] for agent_id in set(agent_ids)}
+        batched_results: Dict[int, List[EvalResult]] = {request.agent_id: [] for request in requests}
 
         # Prepare results for the main thread
-        for agent_id, the_hash, policy, value, key in zip(agent_ids, hashes, policies, values, legal_move_key):
-            move_probs = [[edge, policy[move_idx]] for edge, move_idx in key]
-            batched_results[agent_id].append((the_hash, value.item(), move_probs, key))
+        for request, policy, value, key in zip(requests, policies, values, legal_move_key):
+            if len(request.legal_moves) == 1:
+                # The mask has no key for a single legal move: it gets all the prior
+                priors = np.ones(1)
+            else:
+                # The key is in legal_moves order, so the priors are aligned with them
+                priors = np.array([policy[move_idx] for _, move_idx in key])
+            batched_results[request.agent_id].append(EvalResult(request.node_id, value.item(), priors))
 
         # Send the batches back
         for agent_id, results in batched_results.items():
-            self.results_queue[agent_id].put(results)
+            self.eval_result_queues[agent_id].put(results)
 
     def check_for_network_update(self) -> None:
         assert self.weights_queue is not None

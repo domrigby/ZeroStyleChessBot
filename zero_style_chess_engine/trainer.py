@@ -1,6 +1,7 @@
 from multiprocessing import Process, Queue, Event, synchronize
 from queue import Empty, Full
 from zero_style_chess_engine.memory import Memory
+from zero_style_chess_engine.messages import GameRecord, TrainerStats
 from util.parallel_error_log import error_logger
 from neural_nets.conv_net import ChessNet
 
@@ -13,7 +14,7 @@ from datetime import datetime
 import torch
 
 
-class TrainingProcess(Process):
+class Trainer(Process):
     """This is meant constantly run the neural network evaluation and training in parallel with MCTS"""
 
     min_games_to_train = 0
@@ -23,13 +24,13 @@ class TrainingProcess(Process):
         self,
         save_dir: str,
         neural_net: ChessNet,
-        experience_queues: Optional[List[Queue]] = None,
+        game_record_queues: Optional[List[Queue]] = None,
         weights_queues: Optional[List[Queue]] = None,
         batch_size: int = 1024,
         minibatch_size: int = 32,
         min_num_batches_to_train: int = 128,
         num_agents: int = 1,
-        data_queue: Optional[Queue] = None,
+        stats_queue: Optional[Queue] = None,
         load_path: Optional[str] = None,
         weights_update_freq: int = 100,
         expert_ratio: float = 0.9,
@@ -50,8 +51,8 @@ class TrainingProcess(Process):
         self.log_file_name = os.path.join(save_dir, f"{self.__class__.__name__}.txt")
 
         #  Set up the queues
-        self.experience_queue: Optional[List[Queue]] = experience_queues
-        self.data_queue = data_queue
+        self.game_record_queues: Optional[List[Queue]] = game_record_queues
+        self.stats_queue = stats_queue
         self.weights_queues: List[Queue] = weights_queues if weights_queues is not None else []
 
         self.stop_event = stop_event if stop_event is not None else Event()
@@ -69,10 +70,11 @@ class TrainingProcess(Process):
         # Save the neural network
         self.neural_net: ChessNet = neural_net
 
-        # Initialise the memory... this handles all the experiences
-        self.memory = Memory(
-            1000000, num_agents=num_agents, expert_data_path=load_path, generated_data_dir=generated_data_dir
-        )
+        # Memory settings: the memory itself is built in setup(), in the child process
+        self.num_agents = num_agents
+        self.load_path = load_path
+        self.generated_data_dir = generated_data_dir
+        self.memory: Memory
 
         #  Set up loss plotting windows
         self.value_loss_window = np.zeros(self.update_period)
@@ -91,7 +93,17 @@ class TrainingProcess(Process):
         :param experience_queue:
         :return:
         """
-        self.experience_queue = experience_queue
+        self.game_record_queues = experience_queue
+
+    def setup(self) -> None:
+        """Heavy initialisation, run in the child process rather than pickled into it"""
+        # Initialise the memory... this handles all the experiences
+        self.memory = Memory(
+            1000000,
+            num_agents=self.num_agents,
+            expert_data_path=self.load_path,
+            generated_data_dir=self.generated_data_dir,
+        )
 
     @error_logger
     def run(self) -> None:
@@ -100,6 +112,8 @@ class TrainingProcess(Process):
         sufficient data.
         :return:
         """
+
+        self.setup()
 
         stream_context = (
             torch.cuda.stream(torch.cuda.Stream()) if torch.cuda.is_available() else contextlib.nullcontext()
@@ -110,15 +124,15 @@ class TrainingProcess(Process):
                 time.sleep(self.idle_sleep_seconds)
 
             time_now = time.time()
-            if time_now - self.last_update_time > self.update_period and self.data_queue is not None:
-                new_data = {
-                    "experience_length": len(self.memory.data),
-                    "total_loss": self.total_loss_window.mean(),
-                    "value_loss": self.value_loss_window.mean(),
-                    "policy_loss": self.pol_loss_window.mean(),
-                }
+            if time_now - self.last_update_time > self.update_period and self.stats_queue is not None:
+                new_data = TrainerStats(
+                    experience_length=len(self.memory.data),
+                    total_loss=float(self.total_loss_window.mean()),
+                    value_loss=float(self.value_loss_window.mean()),
+                    policy_loss=float(self.pol_loss_window.mean()),
+                )
 
-                self.data_queue.put_nowait(new_data)
+                self.stats_queue.put_nowait(new_data)
                 self.last_update_time = time_now
 
                 with open(self.save_dir + "/debug.txt", "w") as f:
@@ -130,7 +144,7 @@ class TrainingProcess(Process):
                         f"Games played: {self.games_played}"
                     )
 
-            if time_now - self.last_network_save > 600 and self.data_queue is not None:
+            if time_now - self.last_network_save > 600 and self.stats_queue is not None:
                 self.neural_net.save_network(f"{self.save_dir}/RL_tuned_{self.training_count}.pt")
                 self.last_network_save = time.time()
                 self.memory.save_data()
@@ -140,7 +154,7 @@ class TrainingProcess(Process):
         self.memory.save_data()
 
         # Don't block exit flushing queues whose readers have already stopped
-        for queue in [*self.weights_queues, self.data_queue]:
+        for queue in [*self.weights_queues, self.stats_queue]:
             if queue is not None:
                 queue.cancel_join_thread()
 
@@ -149,17 +163,17 @@ class TrainingProcess(Process):
         Move finished games from the agents into memory, doing a training step per game.
         :return: whether any game was received
         """
-        assert self.experience_queue is not None
+        assert self.game_record_queues is not None
         received = False
-        for queue in self.experience_queue:
+        for queue in self.game_record_queues:
             for _ in range(self.batch_size):
                 try:
-                    game_states, agent_id = queue.get_nowait()
+                    record: GameRecord = queue.get_nowait()
                 except Empty:
                     break
 
                 received = True
-                self.memory.save_game_to_memory(game_states, agent_id)
+                self.memory.save_game_to_memory(record)
                 self.games_played += 1
                 print(f"Games played: {self.games_played}")
 

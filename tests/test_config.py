@@ -33,6 +33,17 @@ def test_command_line_overrides_defaults() -> None:
     assert config.maximum_lag == TrainingConfig().maximum_lag
 
 
+def test_command_line_overrides_search_constants() -> None:
+    c_puct = 1.5
+    max_game_length = 50
+
+    config = parse_training_config(["--c_puct", str(c_puct), "--max_game_length", str(max_game_length)])
+
+    assert config.search.c_puct == c_puct
+    assert config.search.max_game_length == max_game_length
+    assert config.search.gamma == TrainingConfig().search.gamma
+
+
 @pytest.mark.parametrize(
     "csv_name",
     [

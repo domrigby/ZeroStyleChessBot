@@ -1,16 +1,12 @@
-from typing import Any, List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 import numpy as np
-from enum import Enum
 import pickle as pkl
 from datetime import datetime
 import glob
 import os
 import warnings
 
-
-class Turn(Enum):
-    BLACK = "black"
-    WHITE = "white"
+from zero_style_chess_engine.messages import GameRecord
 
 
 class DataPoint:
@@ -52,7 +48,7 @@ class Memory:
             self.last_moves[agent_num] = None
 
         # Deal with expert data
-        self.expert_data: List[Dict[str, Any]] = []
+        self.expert_data: List[DataPoint] = []
         if expert_data_path is not None and os.path.isdir(expert_data_path):
             self.load_expert_data(expert_data_path)
         elif expert_data_path is not None:
@@ -72,24 +68,23 @@ class Memory:
             self.data[self.index] = data_point
         self.index = (self.index + 1) % self.max_len
 
-    def save_game_to_memory(self, game: List[Dict[str, Any]], agent_id: int) -> None:
+    def save_game_to_memory(self, game: GameRecord) -> None:
         """
         Create a sequence of data points
         :param game:
-        :param agent_id:
         :return:
         """
 
         game_moves: List[DataPoint] = []
 
-        entropy_of_batch: np.ndarray = np.zeros(len(game))
+        entropy_of_batch: np.ndarray = np.zeros(len(game.positions))
 
-        for idx, game_state in enumerate(game):
+        for idx, position in enumerate(game.positions):
             # Extract the states
-            state = game_state["state"]
-            observed_moves = game_state["moves"]
-            visits = game_state["visit_counts"]
-            value = game_state["value"]
+            state = position.fen
+            observed_moves = position.moves
+            visits = position.visit_counts
+            value = position.value
 
             moves: List[str] = []
             probs: List[float] = []
@@ -136,13 +131,13 @@ class Memory:
 
         # Retrieve the batch
         if real_batch > 0:
-            states, moves, probs, wins = self.get_real_data_batch(batch_size=real_batch)
+            states, moves, probs, wins = self.sample_batch(self.data, batch_size=real_batch)
         else:
             states, moves, probs, wins = [], [], [], []
 
         # Extend the current batch with some new data
         if expert_batch > 0:
-            new_batch = self.get_expert_batch(batch_size=expert_batch)
+            new_batch = self.sample_batch(self.expert_data, batch_size=expert_batch)
 
             states.extend(new_batch[0])
             moves.extend(new_batch[1])
@@ -151,17 +146,19 @@ class Memory:
 
         return states, moves, probs, wins
 
-    def get_real_data_batch(
-        self, batch_size: int = 32
+    @staticmethod
+    def sample_batch(
+        data: List[DataPoint], batch_size: int = 32
     ) -> Tuple[List[str], List[List[str]], List[List[float]], List[float]]:
         """
-        Generate a random batch of data
+        Sample a random batch (with replacement) from self-play or expert data
+        :param data: the data points to sample from
         :param batch_size: size of the batch
         :return:
         """
-        idxs = np.random.choice(len(self.data), batch_size)
+        idxs = np.random.choice(len(data), batch_size)
 
-        batch_data = [self.data[idx] for idx in idxs]
+        batch_data = [data[idx] for idx in idxs]
 
         states = [turn.state for turn in batch_data]
         moves = [turn.moves for turn in batch_data]
@@ -205,7 +202,8 @@ class Memory:
 
     def load_expert_data(self, path: str, file_format: str = "pkl", max_len: int = 250000) -> None:
         """
-        Collect a certain amount of expert data from the expert data directory. Data should be in the form given by neural_nets/data
+        Collect a certain amount of expert data from the expert data directory. Data should be in the form given by neural_nets/data:
+        pickled lists of {"fen", "moves" (the one expert move, UCI), "value"} dicts. They're converted to DataPoints here.
         :param path: path to directory
         :param file_format: format the data is in
         :param max_len: maximum number to retrieve
@@ -216,26 +214,8 @@ class Memory:
         for file in files:
             with open(file, "rb") as f:
                 moves = pkl.load(f)
-                self.expert_data.extend(moves)
+                # Expert data only has one move
+                self.expert_data.extend(DataPoint(turn["fen"], [turn["moves"]], [1.0], turn["value"]) for turn in moves)
                 num_collected += len(moves)
             if num_collected >= max_len:
                 break
-
-    def get_expert_batch(
-        self, batch_size: int = 32
-    ) -> Tuple[List[str], List[List[str]], List[List[float]], List[float]]:
-        """
-        Generate a random batch of data
-        :param batch_size: size of the batch
-        :return:
-        """
-        idxs = np.random.choice(len(self.expert_data), batch_size)
-
-        batch_data = [self.expert_data[idx] for idx in idxs]
-
-        states = [turn["fen"] for turn in batch_data]
-        moves = [[turn["moves"]] for turn in batch_data]
-        probs = [[1.0] for turn in batch_data]  # Expert data only has one move
-        wins = [turn["value"] for turn in batch_data]
-
-        return states, moves, probs, wins
