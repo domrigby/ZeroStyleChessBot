@@ -1,0 +1,17 @@
+repos:
+  # Keep rev in step with the ruff version in uv.lock, so pre-commit and CI agree.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  # Local hook: mypy runs in the project environment so it sees the real torch/numpy and the chess_moves stub.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run --no-sync mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false

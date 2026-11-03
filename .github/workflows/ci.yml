@@ -27,5 +27,19 @@ jobs:
           uv pip install --reinstall-package torch "torch==${TORCH_VERSION}" \
             --index https://download.pytorch.org/whl/cpu
 
+      # Lint and type checks run here, not in a separate job: mypy needs torch importable, and this job has already
+      # synced it. Same commands as .pre-commit-config.yaml.
+      - name: Ruff lint
+        run: uv run --no-sync ruff check .
+
+      - name: Ruff format check
+        run: uv run --no-sync ruff format --check .
+
+      - name: Mypy
+        run: uv run --no-sync mypy
+
       - name: Run tests
         run: uv run --no-sync pytest -m "not integration" -v
+
+      - name: Run integration tests
+        run: uv run --no-sync pytest tests/integration -m "not slow" -v
