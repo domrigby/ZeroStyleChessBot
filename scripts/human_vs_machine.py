@@ -1,3 +1,4 @@
+import dataclasses
 import sys
 import math
 import threading
@@ -80,6 +81,7 @@ def main(hydra_config: DictConfig) -> None:
     engine_thinking = False
     engine_arrow = None  # Tuple: (engine_move_start, engine_move_end)
     search_summary: Optional[SearchSummary] = None  # Latest snapshot of the engine's search, set by its thread
+    ponder_summary: Optional[SearchSummary] = None  # Latest snapshot of the search on the human's move, while pondering
 
     clock = pygame.time.Clock()
     running = True
@@ -210,8 +212,22 @@ def main(hydra_config: DictConfig) -> None:
         nonlocal search_summary
         search_summary = summary
 
+    def show_ponder_progress(summary: SearchSummary) -> None:
+        nonlocal ponder_summary
+        if config.display_mode == "play":
+            # The moves searched are the human's candidates: showing them would be a hint
+            summary = dataclasses.replace(summary, candidates=[], principal_variation=[])
+        ponder_summary = summary
+
+    def start_pondering() -> None:
+        if config.ponder:
+            engine.start_pondering(config.ponder_max_rollouts, show_ponder_progress if config.show_search else None)
+
     def process_engine_move(user_move_str: str) -> None:
         nonlocal start_square, end_square, dragging, current_drag_pos, engine_thinking, engine_arrow, search_summary
+        nonlocal ponder_summary
+        engine.stop_pondering()  # The search tree is about to change under it
+        ponder_summary = None
         if engine.apply_user_move(user_move_str):
             print("User move:", user_move_str)
             search_summary = None  # The last summary is for the previous position
@@ -223,11 +239,14 @@ def main(hydra_config: DictConfig) -> None:
                 engine_arrow = (eng_from, eng_to)
         else:
             print("Invalid move:", user_move_str)
+        start_pondering()  # The human is to move again either way
         start_square = None
         end_square = None
         dragging = False
         current_drag_pos = None
         engine_thinking = False
+
+    start_pondering()  # The human moves first
 
     # ---- Main Loop ----
     while running:
@@ -299,10 +318,12 @@ def main(hydra_config: DictConfig) -> None:
             draw_arrow(screen, from_center, to_center, color=ENGINE_ARROW_COLOR, width=4)
 
         # While the engine thinks, show the moves it is weighing; afterwards the panel explains the move it chose
-        if engine_thinking:
-            draw_candidate_arrows(screen, search_summary, lambda sq: square_center(chess.square_name(sq)))
+        # While pondering, the panel follows the search on the human's move instead. Only analysis mode draws arrows
+        shown_summary = search_summary if engine_thinking else ponder_summary or search_summary
+        if config.display_mode == "analysis" and (engine_thinking or ponder_summary is not None):
+            draw_candidate_arrows(screen, shown_summary, lambda sq: square_center(chess.square_name(sq)))
         if search_panel is not None:
-            search_panel.draw(screen, search_summary)
+            search_panel.draw(screen, shown_summary)
 
         # Draw the buttons in the left panel.
         draw_button(screen, "Queenside Castle", queenside_button_rect)

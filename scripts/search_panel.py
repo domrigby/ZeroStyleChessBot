@@ -54,6 +54,11 @@ class SearchPanel:
         y = self._blit(screen, f"Speed   {summary.rollouts_per_second:.0f} rollouts/s", (x, y))
         y = self._blit(screen, f"Tree    {summary.tree_size} nodes, depth {summary.max_depth}", (x, y))
 
+        if not summary.candidates:
+            # Play mode strips the moves from a search on the human's move
+            self._blit(screen, "Pondering your move: moves hidden", (x, y + 6), colour=MUTED)
+            return
+
         y = self._blit(screen, f"{'Move':<8}{'Visits':>7}{'Q':>7}{'Prior':>7}", (x, y + 6), colour=MUTED)
         for candidate in summary.candidates:
             row = (

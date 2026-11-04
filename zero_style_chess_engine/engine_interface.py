@@ -8,12 +8,16 @@ from zero_style_chess_engine.mcts import MCTS
 from zero_style_chess_engine.search_insights import SearchSummary, summarise_search
 from multiprocessing import Event, Queue
 from typing import Callable, Optional, Tuple
+import threading
 import time
 
 
 class EngineInterface:
     # Rollouts between progress reports during a search
     progress_interval = 100
+    # Rollouts between checks for a request to stop pondering: the user's move waits for up to one chunk
+    ponder_chunk = 128
+    _ponder_thread: Optional[threading.Thread] = None
 
     def __init__(self, network_path: str, num_rollouts: int = 2000, move_selection: MoveSelection = "visits") -> None:
         # Initialize your neural network and engine components.
@@ -56,6 +60,7 @@ class EngineInterface:
 
     def close(self, timeout: float = 10.0) -> None:
         """Stop the evaluator process; otherwise it keeps the program alive."""
+        self.stop_pondering()
         self.stop_event.set()
         self.evaluator.join(timeout)
         if self.evaluator.is_alive():
@@ -64,6 +69,34 @@ class EngineInterface:
 
     def set_rollouts(self, rollout_count: int) -> None:
         self.rollouts = rollout_count
+
+    def start_pondering(self, max_rollouts: int, on_progress: Optional[Callable[[SearchSummary], None]] = None) -> None:
+        """
+        Search the current position in a background thread while the user decides, until stop_pondering or
+        max_rollouts. The user's move then keeps the search below it. Call stop_pondering before touching the tree
+        :param on_progress: called from the pondering thread after every chunk; never after stop_pondering returns
+        """
+        self._ponder_stop = threading.Event()
+        self._ponder_thread = threading.Thread(target=self._ponder, args=(max_rollouts, on_progress), daemon=True)
+        self._ponder_thread.start()
+
+    def _ponder(self, max_rollouts: int, on_progress: Optional[Callable[[SearchSummary], None]]) -> None:
+        start_time = time.perf_counter()
+        rollouts_done = 0
+        while rollouts_done < max_rollouts and not self._ponder_stop.is_set() and not self.mcts.stop_event.is_set():
+            chunk = min(self.ponder_chunk, max_rollouts - rollouts_done)
+            self.mcts.search(chunk)
+            rollouts_done += chunk
+            if on_progress is not None:
+                on_progress(summarise_search(self.mcts.root, rollouts_done, time.perf_counter() - start_time))
+
+    def stop_pondering(self) -> None:
+        """Stop pondering and wait for the current chunk of rollouts to finish. Safe to call when not pondering"""
+        if self._ponder_thread is None:
+            return
+        self._ponder_stop.set()
+        self._ponder_thread.join()
+        self._ponder_thread = None
 
     def apply_user_move(self, move_uci: str) -> bool:
         """Apply a user move (in UCI format) to the board and reset the tree to the new state."""

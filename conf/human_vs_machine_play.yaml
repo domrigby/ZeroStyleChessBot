@@ -1,0 +1,8 @@
+# Play mode (the default, so this matches human_vs_machine): while the engine ponders on your move, show its search
+# statistics but not the moves it is weighing for you, so the panel is no hint.
+# Run with: uv run python -m scripts.human_vs_machine --config-name human_vs_machine_play
+defaults:
+  - human_vs_machine
+  - _self_
+
+display_mode: play

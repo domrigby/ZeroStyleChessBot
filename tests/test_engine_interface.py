@@ -104,3 +104,54 @@ def test_search_progress_is_reported_in_chunks_ending_with_the_full_search() -> 
 
     assert [summary.rollouts_this_search for summary in summaries] == [100, 200, 250]
     assert all(summary.fen == start_fen for summary in summaries)
+
+
+def test_stop_pondering_interrupts_a_long_ponder() -> None:
+    engine = _engine_with_instant_evaluator(rollouts=1)
+    engine.get_engine_move()
+    user_root = engine.mcts.root
+
+    engine.start_pondering(max_rollouts=10**9)
+    engine.stop_pondering()
+
+    assert engine._ponder_thread is None
+    assert engine.mcts.root is user_root
+    assert user_root.Ns.sum() < 10**9
+
+
+def test_pondered_reply_keeps_its_subtree() -> None:
+    engine = _engine_with_instant_evaluator(rollouts=1)
+    engine.get_engine_move()
+    user_root = engine.mcts.root
+
+    engine.start_pondering(max_rollouts=200)
+    assert engine._ponder_thread is not None
+    engine._ponder_thread.join(JOIN_TIMEOUT_SECONDS)  # Stops by itself at max_rollouts
+    engine.stop_pondering()
+    reply_idx = max(user_root.child_nodes, key=lambda idx: user_root.Ns[idx])
+    reply = user_root.child_nodes[reply_idx]
+
+    assert engine.apply_user_move(user_root.moves[reply_idx])
+
+    assert engine.mcts.root is reply
+    assert reply.Ns.sum() > 0
+
+
+def test_stop_pondering_is_safe_when_not_pondering() -> None:
+    engine = _engine_with_instant_evaluator(rollouts=1)
+    engine.stop_pondering()
+
+
+def test_pondering_reports_progress_on_the_users_position() -> None:
+    engine = _engine_with_instant_evaluator(rollouts=1)
+    engine.get_engine_move()
+    user_fen = engine.mcts.root.state
+    summaries: List[SearchSummary] = []
+
+    engine.start_pondering(max_rollouts=300, on_progress=summaries.append)
+    assert engine._ponder_thread is not None
+    engine._ponder_thread.join(JOIN_TIMEOUT_SECONDS)
+    engine.stop_pondering()
+
+    assert [summary.rollouts_this_search for summary in summaries] == [128, 256, 300]
+    assert all(summary.fen == user_fen for summary in summaries)

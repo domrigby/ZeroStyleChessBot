@@ -11,6 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # How the engine picks a move after searching. Most visited is the robust choice: a high Q on a few visits is mostly noise
 MoveSelection = Literal["visits", "q"]
 
+# How much of the search to show. "play" draws no arrows and, while the engine ponders on your move, hides the moves it
+# is weighing for you, so it is no hint; "analysis" shows everything
+DisplayMode = Literal["play", "analysis"]
+
 
 class _Config(BaseModel):
     # extra="forbid": a misspelt key (search.cpuct=1) fails at startup instead of being ignored
@@ -107,6 +111,14 @@ class HumanVsMachineConfig(_Config):
     )
     show_search: bool = Field(
         True, description="Show the engine's search: a side panel of statistics and arrows for the moves it is weighing"
+    )
+    ponder: bool = Field(True, description="Keep searching while waiting for your move, so the engine plays stronger")
+    display_mode: DisplayMode = Field(
+        "play",
+        description="'play': no arrows, and no candidate moves while pondering on yours; 'analysis': show everything",
+    )
+    ponder_max_rollouts: int = Field(
+        20000, ge=1, description="Most rollouts spent pondering one position; bounds the tree's memory while you think"
     )
 
 

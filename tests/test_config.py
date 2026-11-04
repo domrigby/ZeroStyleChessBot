@@ -323,6 +323,22 @@ def test_move_selection_defaults_to_visits_and_rejects_unknown_values() -> None:
         from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine", overrides=["move_selection=value"]))
 
 
+def test_display_mode_defaults_to_play_and_rejects_unknown_values() -> None:
+    assert from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine")).display_mode == "play"
+    analysis = compose(config_name="human_vs_machine", overrides=["display_mode=analysis"])
+    assert from_hydra(HumanVsMachineConfig, analysis).display_mode == "analysis"
+
+    with pytest.raises(ValidationError, match="display_mode"):
+        from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine", overrides=["display_mode=cheat"]))
+
+
+@pytest.mark.parametrize("mode", ["play", "analysis"])
+def test_human_vs_machine_mode_presets_differ_from_the_base_config_only_in_display_mode(mode: str) -> None:
+    preset = compose(config_name=f"human_vs_machine_{mode}", overrides=["num_rollouts=500"])
+
+    assert from_hydra(HumanVsMachineConfig, preset) == HumanVsMachineConfig(num_rollouts=500, display_mode=mode)
+
+
 def test_human_vs_machine_rollouts_are_set_from_the_command_line() -> None:
     assert from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine")) == HumanVsMachineConfig()
 

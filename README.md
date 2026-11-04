@@ -35,10 +35,18 @@ uv run python -m scripts.human_vs_machine
 ```
 Drag a piece to its target square, then press **Confirm Move**. The engine's reply is drawn as a blue arrow. It
 searches 2000 MCTS simulations per move: about 7 s on an Apple-silicon laptop CPU, longer on slower machines. Change
-that with `num_rollouts=500`, or the weights with `network_path=PATH`. While it thinks, green arrows show the moves it
-is weighing; the side panel shows its evaluation, top candidates (visits, Q, network prior) and expected line. Hide
-both with `show_search=false` (also accepted by `chess_engine_vs_zero_style`). The engine plays its most visited
+that with `num_rollouts=500`, or the weights with `network_path=PATH`. The side panel shows its evaluation, top
+candidates (visits, Q, network prior) and expected line; in analysis mode (below) green arrows also show the moves it
+is weighing. Hide both with `show_search=false` (also accepted by `chess_engine_vs_zero_style`). The engine plays its most visited
 move; `move_selection=q` makes it play the move with the highest searched value instead.
+
+While you think, the engine keeps searching your position (pondering), so its reply builds on that search; turn this
+off with `ponder=false`. Two presets set what the panel shows meanwhile:
+```bash
+uv run python -m scripts.human_vs_machine --config-name human_vs_machine_play      # the default: no arrows; search statistics, but not your candidate moves
+uv run python -m scripts.human_vs_machine --config-name human_vs_machine_analysis  # everything, arrows for your best moves included
+```
+Both accept the overrides above; `display_mode=analysis` on the default config does the same.
 
 **Run a short training job on CPU:**
 ```bash
