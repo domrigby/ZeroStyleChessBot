@@ -5,7 +5,7 @@ import chess
 import pygame
 import pytest
 
-from scripts.search_panel import SearchPanel, _figurine_san, _numbered_san_line
+from zero_style_chess_engine.ui.search_panel import SearchPanel, _figurine_san, _numbered_san_line
 from tests.test_search import MATE_IN_ONE_FEN, NUM_ROLLOUTS, START_FEN, _all_nodes, _drain, _make_tree
 from zero_style_chess_engine.mcts import MCTS
 from zero_style_chess_engine.search_insights import SearchSummary, summarise_search

@@ -48,6 +48,11 @@ uv run python -m scripts.human_vs_machine --config-name human_vs_machine_analysi
 ```
 Both accept the overrides above; `display_mode=analysis` on the default config does the same.
 
+Step back through the game with ←/→ (Home/End for the start and the live position); the panel shows the engine's last
+search of the position you are viewing, and the engine keeps searching the live one meanwhile. You can only move on
+the live position. Analysis mode adds a graph of White's expected score, (1 + value) / 2, over the game; click it to
+jump to a move. `engine_vs_engine` has the same controls, with the graph whenever `show_search` is on.
+
 **Run a short training job on CPU:**
 ```bash
 uv run python -m scripts.parallel_train num_agents=2 sims=32

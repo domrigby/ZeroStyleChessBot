@@ -1,6 +1,5 @@
 import dataclasses
 import sys
-import math
 import threading
 import pygame
 import chess
@@ -9,9 +8,9 @@ from omegaconf import DictConfig
 from zero_style_chess_engine.config import HumanVsMachineConfig, check_paths_exist, from_hydra, register_defaults
 from zero_style_chess_engine.engine_interface import EngineInterface  # Your engine interface module
 from zero_style_chess_engine.search_insights import SearchSummary
-from scripts.search_panel import PANEL_WIDTH, SearchPanel, draw_candidate_arrows
+from zero_style_chess_engine.ui.visualiser import MARGIN, Visualiser, draw_arrow
 import multiprocessing as mp
-from typing import Optional, Tuple
+from typing import Optional
 
 register_defaults("human_vs_machine_defaults", HumanVsMachineConfig)
 
@@ -29,26 +28,14 @@ def main(hydra_config: DictConfig) -> None:
         pass
 
     # ---- Configuration ----
-    BOARD_SIZE = 400  # Board is 400x400 pixels
-    SQUARE_SIZE = BOARD_SIZE // 8  # Each square is 50x50 pixels
-
     # Layout configuration
-    MARGIN = 20  # General margin
     BUTTON_WIDTH = 120  # Width of the left button panel
     BUTTON_HEIGHT = 40  # Button height
     BUTTON_SPACING = 20  # Vertical space between buttons
 
-    # Board offset: board is drawn to the right of the button panel
-    BOARD_X = MARGIN + BUTTON_WIDTH + MARGIN  # Board starts after left panel + margin
     BOARD_Y = MARGIN
 
-    PANEL_X = BOARD_X + BOARD_SIZE + MARGIN  # Search panel (if shown) to the right of the board
-    WINDOW_WIDTH = (PANEL_X + PANEL_WIDTH if config.show_search else BOARD_X + BOARD_SIZE) + MARGIN
-    WINDOW_HEIGHT = BOARD_Y + BOARD_SIZE + MARGIN  # Bottom margin
-
     # Colors
-    LIGHT_SQUARE = (240, 217, 181)
-    DARK_SQUARE = (181, 136, 99)
     ARROW_COLOR = (255, 0, 0)
     ENGINE_ARROW_COLOR = (0, 0, 255)
     BUTTON_COLOR = (70, 130, 180)
@@ -61,16 +48,15 @@ def main(hydra_config: DictConfig) -> None:
     )
 
     # ---- Pygame Initialization ----
-    pygame.init()
-    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-    pygame.display.set_caption("Play vs Chess Engine")
+    # The board sits right of the button panel
+    visualiser = Visualiser("Play vs Chess Engine", config.display_mode, config.show_search, BUTTON_WIDTH + MARGIN)
+    screen = visualiser.screen
+    WINDOW_WIDTH, WINDOW_HEIGHT = visualiser.width, visualiser.height
+    # The graph is drawn from the searches, so analysis mode reports them even without the panel
+    track_search = config.show_search or config.display_mode == "analysis"
 
-    # Use a font that supports Unicode chess symbols: Apple Symbols on macOS, DejaVu Sans on Linux. Not bold: a
-    # synthesised bold fills in the outlined white pieces.
-    piece_font = pygame.font.SysFont("applesymbols,dejavusans", 36)
     button_font = pygame.font.SysFont("Arial", 24)
     status_font = pygame.font.SysFont("Arial", 28)
-    search_panel = SearchPanel(pygame.Rect(PANEL_X, BOARD_Y, PANEL_WIDTH, BOARD_SIZE)) if config.show_search else None
 
     # ---- Global Variables ----
     dragging = False
@@ -96,70 +82,12 @@ def main(hydra_config: DictConfig) -> None:
 
     # ---- Utility Functions ----
 
-    def draw_board(screen: pygame.Surface, board: chess.Board) -> None:
-        """Draw the chessboard and pieces using the current state from python‑chess."""
-        # Draw squares with board offset.
-        for row in range(8):
-            for col in range(8):
-                color = LIGHT_SQUARE if (row + col) % 2 == 0 else DARK_SQUARE
-                rect = pygame.Rect(BOARD_X + col * SQUARE_SIZE, BOARD_Y + row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE)
-                pygame.draw.rect(screen, color, rect)
-        # Draw pieces.
-        for row in range(8):
-            for col in range(8):
-                square_name = chr(ord("a") + col) + str(8 - row)
-                try:
-                    sq = chess.parse_square(square_name)
-                except Exception:
-                    continue
-                piece = board.piece_at(sq)
-                if piece:
-                    symbol = piece.unicode_symbol()
-                    text_surface = piece_font.render(symbol, True, (0, 0, 0))
-                    text_rect = text_surface.get_rect(
-                        center=(
-                            BOARD_X + col * SQUARE_SIZE + SQUARE_SIZE / 2,
-                            BOARD_Y + row * SQUARE_SIZE + SQUARE_SIZE / 2,
-                        )
-                    )
-                    screen.blit(text_surface, text_rect)
-
     def draw_button(screen: pygame.Surface, text: str, rect: pygame.Rect) -> None:
         """Draw a simple button with the given text."""
         pygame.draw.rect(screen, BUTTON_COLOR, rect)
         text_surf = button_font.render(text, True, BUTTON_TEXT_COLOR)
         text_rect = text_surf.get_rect(center=rect.center)
         screen.blit(text_surf, text_rect)
-
-    def pixel_to_square(x: int, y: int) -> str:
-        """Convert window pixel coordinates to a chess square in algebraic notation (accounting for board offset)."""
-        col = int((x - BOARD_X) // SQUARE_SIZE)
-        row = int((y - BOARD_Y) // SQUARE_SIZE)
-        return chr(ord("a") + col) + str(8 - row)
-
-    def square_center(square: str) -> Tuple[float, float]:
-        """Return the pixel center (x,y) of the given chess square (e.g. 'e2') accounting for board offset."""
-        col = ord(square[0]) - ord("a")
-        row = 8 - int(square[1])
-        return (BOARD_X + col * SQUARE_SIZE + SQUARE_SIZE / 2, BOARD_Y + row * SQUARE_SIZE + SQUARE_SIZE / 2)
-
-    def draw_arrow(
-        screen: pygame.Surface,
-        start: Tuple[float, float],
-        end: Tuple[float, float],
-        color: Tuple[int, int, int] = ARROW_COLOR,
-        width: int = 3,
-    ) -> None:
-        """Draw an arrow from start to end. Start and end are (x,y) tuples."""
-        pygame.draw.line(screen, color, start, end, width)
-        angle = math.atan2(end[1] - start[1], end[0] - start[0])
-        headlen = 10
-        arrow_x1 = end[0] - headlen * math.cos(angle - math.pi / 6)
-        arrow_y1 = end[1] - headlen * math.sin(angle - math.pi / 6)
-        arrow_x2 = end[0] - headlen * math.cos(angle + math.pi / 6)
-        arrow_y2 = end[1] - headlen * math.sin(angle + math.pi / 6)
-        pygame.draw.line(screen, color, end, (arrow_x1, arrow_y1), width)
-        pygame.draw.line(screen, color, end, (arrow_x2, arrow_y2), width)
 
     def display_endgame_box(message: str) -> None:
         """Display a semi‑transparent overlay box with an endgame message."""
@@ -211,6 +139,7 @@ def main(hydra_config: DictConfig) -> None:
     def show_search_progress(summary: SearchSummary) -> None:
         nonlocal search_summary
         search_summary = summary
+        visualiser.history.record_search(summary)
 
     def show_ponder_progress(summary: SearchSummary) -> None:
         nonlocal ponder_summary
@@ -218,10 +147,11 @@ def main(hydra_config: DictConfig) -> None:
             # The moves searched are the human's candidates: showing them would be a hint
             summary = dataclasses.replace(summary, candidates=[], principal_variation=[])
         ponder_summary = summary
+        visualiser.history.record_search(summary)
 
     def start_pondering() -> None:
         if config.ponder:
-            engine.start_pondering(config.ponder_max_rollouts, show_ponder_progress if config.show_search else None)
+            engine.start_pondering(config.ponder_max_rollouts, show_ponder_progress if track_search else None)
 
     def process_engine_move(user_move_str: str) -> None:
         nonlocal start_square, end_square, dragging, current_drag_pos, engine_thinking, engine_arrow, search_summary
@@ -230,8 +160,10 @@ def main(hydra_config: DictConfig) -> None:
         ponder_summary = None
         if engine.apply_user_move(user_move_str):
             print("User move:", user_move_str)
+            visualiser.history.push(engine.current_board)
             search_summary = None  # The last summary is for the previous position
-            eng_move, _ = engine.get_engine_move(on_progress=show_search_progress if config.show_search else None)
+            eng_move, _ = engine.get_engine_move(on_progress=show_search_progress if track_search else None)
+            visualiser.history.push(engine.current_board)
             print("Engine move:", eng_move)
             if len(eng_move) >= 4:
                 eng_from = eng_move[0:2]
@@ -254,15 +186,20 @@ def main(hydra_config: DictConfig) -> None:
             if event.type == pygame.QUIT:
                 running = False
 
-            elif event.type == pygame.MOUSEBUTTONDOWN:
+            elif visualiser.handle_event(event):
+                pass
+
+            # Moves only on the live board, not while looking back through the game
+            elif event.type == pygame.MOUSEBUTTONDOWN and visualiser.is_live:
                 x, y = event.pos
-                # Check if click is in the board area (account for board offset) and engine is not thinking.
-                if BOARD_X <= x < BOARD_X + BOARD_SIZE and BOARD_Y <= y < BOARD_Y + BOARD_SIZE and not engine_thinking:
-                    start_square = pixel_to_square(x, y)
+                clicked = visualiser.square_at((x, y))
+                # Check if click is in the board area and engine is not thinking.
+                if clicked is not None and not engine_thinking:
+                    start_square = chess.square_name(clicked)
                     dragging = True
                     current_drag_pos = (x, y)
                 # Else if click is in the left panel area, check buttons.
-                elif x < BOARD_X:
+                elif x < visualiser.board_rect.x:
                     if queenside_button_rect.collidepoint(x, y) and not engine_thinking:
                         if engine.current_board.turn:  # White's turn.
                             move_str = "e1c1"
@@ -292,10 +229,10 @@ def main(hydra_config: DictConfig) -> None:
 
             elif event.type == pygame.MOUSEBUTTONUP:
                 if dragging:
-                    x, y = event.pos
                     # Only register the drop if it's within the board area.
-                    if BOARD_X <= x < BOARD_X + BOARD_SIZE and BOARD_Y <= y < BOARD_Y + BOARD_SIZE:
-                        end_square = pixel_to_square(x, y)
+                    dropped = visualiser.square_at(event.pos)
+                    if dropped is not None:
+                        end_square = chess.square_name(dropped)
                     dragging = False
 
             elif event.type == pygame.MOUSEMOTION:
@@ -303,27 +240,23 @@ def main(hydra_config: DictConfig) -> None:
                     current_drag_pos = event.pos
 
         # ---- Drawing Section ----
-        screen.fill((0, 0, 0))
-        draw_board(screen, engine.current_board)
-
-        # Draw the user drag arrow if one exists.
-        if start_square and current_drag_pos:
-            start_center = square_center(start_square)
-            draw_arrow(screen, start_center, current_drag_pos)
-
         # Draw engine's move arrow.
+        arrows = []
         if engine_arrow:
-            from_center = square_center(engine_arrow[0])
-            to_center = square_center(engine_arrow[1])
-            draw_arrow(screen, from_center, to_center, color=ENGINE_ARROW_COLOR, width=4)
+            arrows.append(
+                (chess.parse_square(engine_arrow[0]), chess.parse_square(engine_arrow[1]), ENGINE_ARROW_COLOR)
+            )
 
         # While the engine thinks, show the moves it is weighing; afterwards the panel explains the move it chose
         # While pondering, the panel follows the search on the human's move instead. Only analysis mode draws arrows
         shown_summary = search_summary if engine_thinking else ponder_summary or search_summary
-        if config.display_mode == "analysis" and (engine_thinking or ponder_summary is not None):
-            draw_candidate_arrows(screen, shown_summary, lambda sq: square_center(chess.square_name(sq)))
-        if search_panel is not None:
-            search_panel.draw(screen, shown_summary)
+        show_candidates = config.display_mode == "analysis" and (engine_thinking or ponder_summary is not None)
+        visualiser.draw(engine.current_board, shown_summary, arrows, show_candidates)
+
+        # Draw the user drag arrow if one exists.
+        if visualiser.is_live and start_square and current_drag_pos:
+            start_center = visualiser.square_center(chess.parse_square(start_square))
+            draw_arrow(screen, start_center, current_drag_pos, ARROW_COLOR, 3)
 
         # Draw the buttons in the left panel.
         draw_button(screen, "Queenside Castle", queenside_button_rect)
