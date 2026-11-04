@@ -3,11 +3,23 @@ import math
 import threading
 import pygame
 import chess
+import hydra
+from omegaconf import DictConfig
+from zero_style_chess_engine.config import HumanVsMachineConfig, check_paths_exist, from_hydra, register_defaults
 from zero_style_chess_engine.engine_interface import EngineInterface  # Your engine interface module
+from zero_style_chess_engine.search_insights import SearchSummary
+from scripts.search_panel import PANEL_WIDTH, SearchPanel, draw_candidate_arrows
 import multiprocessing as mp
-from typing import Tuple
+from typing import Optional, Tuple
 
-if __name__ == "__main__":
+register_defaults("human_vs_machine_defaults", HumanVsMachineConfig)
+
+
+@hydra.main(version_base="1.3", config_path="../conf", config_name="human_vs_machine")
+def main(hydra_config: DictConfig) -> None:
+    config = from_hydra(HumanVsMachineConfig, hydra_config)
+    check_paths_exist(config)
+
     try:
         mp.set_start_method("spawn", force=True)
         print("spawned")
@@ -29,7 +41,8 @@ if __name__ == "__main__":
     BOARD_X = MARGIN + BUTTON_WIDTH + MARGIN  # Board starts after left panel + margin
     BOARD_Y = MARGIN
 
-    WINDOW_WIDTH = BOARD_X + BOARD_SIZE + MARGIN  # Right margin at end of board
+    PANEL_X = BOARD_X + BOARD_SIZE + MARGIN  # Search panel (if shown) to the right of the board
+    WINDOW_WIDTH = (PANEL_X + PANEL_WIDTH if config.show_search else BOARD_X + BOARD_SIZE) + MARGIN
     WINDOW_HEIGHT = BOARD_Y + BOARD_SIZE + MARGIN  # Bottom margin
 
     # Colors
@@ -42,7 +55,9 @@ if __name__ == "__main__":
     THINKING_COLOR = (255, 0, 0)
 
     # ---- Engine Initialization ----
-    engine = EngineInterface(network_path=r"neural_nets/example_network.pt")
+    engine = EngineInterface(
+        network_path=config.network_path, num_rollouts=config.num_rollouts, move_selection=config.move_selection
+    )
 
     # ---- Pygame Initialization ----
     pygame.init()
@@ -54,6 +69,7 @@ if __name__ == "__main__":
     piece_font = pygame.font.SysFont("applesymbols,dejavusans", 36)
     button_font = pygame.font.SysFont("Arial", 24)
     status_font = pygame.font.SysFont("Arial", 28)
+    search_panel = SearchPanel(pygame.Rect(PANEL_X, BOARD_Y, PANEL_WIDTH, BOARD_SIZE)) if config.show_search else None
 
     # ---- Global Variables ----
     dragging = False
@@ -63,6 +79,7 @@ if __name__ == "__main__":
 
     engine_thinking = False
     engine_arrow = None  # Tuple: (engine_move_start, engine_move_end)
+    search_summary: Optional[SearchSummary] = None  # Latest snapshot of the engine's search, set by its thread
 
     clock = pygame.time.Clock()
     running = True
@@ -189,11 +206,16 @@ if __name__ == "__main__":
                     sys.exit()
 
     # ---- Thread Function for Engine Move ----
+    def show_search_progress(summary: SearchSummary) -> None:
+        nonlocal search_summary
+        search_summary = summary
+
     def process_engine_move(user_move_str: str) -> None:
-        global start_square, end_square, dragging, current_drag_pos, engine_thinking, engine_arrow
+        nonlocal start_square, end_square, dragging, current_drag_pos, engine_thinking, engine_arrow, search_summary
         if engine.apply_user_move(user_move_str):
             print("User move:", user_move_str)
-            eng_move, _ = engine.get_engine_move()
+            search_summary = None  # The last summary is for the previous position
+            eng_move, _ = engine.get_engine_move(on_progress=show_search_progress if config.show_search else None)
             print("Engine move:", eng_move)
             if len(eng_move) >= 4:
                 eng_from = eng_move[0:2]
@@ -276,6 +298,12 @@ if __name__ == "__main__":
             to_center = square_center(engine_arrow[1])
             draw_arrow(screen, from_center, to_center, color=ENGINE_ARROW_COLOR, width=4)
 
+        # While the engine thinks, show the moves it is weighing; afterwards the panel explains the move it chose
+        if engine_thinking:
+            draw_candidate_arrows(screen, search_summary, lambda sq: square_center(chess.square_name(sq)))
+        if search_panel is not None:
+            search_panel.draw(screen, search_summary)
+
         # Draw the buttons in the left panel.
         draw_button(screen, "Queenside Castle", queenside_button_rect)
         draw_button(screen, "Confirm Move", confirm_button_rect)
@@ -303,3 +331,7 @@ if __name__ == "__main__":
     pygame.quit()
     engine.close()
     sys.exit()
+
+
+if __name__ == "__main__":
+    main()

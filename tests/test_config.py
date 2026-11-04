@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from neural_nets.data.fen_chess_puzzles.curriculum import START_STATE, load_curricula
 from zero_style_chess_engine.config import (
+    HumanVsMachineConfig,
     SearchConfig,
     SupervisedConfig,
     TrainingConfig,
@@ -64,6 +65,7 @@ def hydra_conf() -> Iterator[None]:
     register_defaults("training_defaults", TrainingConfig)
     register_defaults("supervised_defaults", SupervisedConfig)
     register_defaults("vs_stockfish_defaults", VsStockfishConfig)
+    register_defaults("human_vs_machine_defaults", HumanVsMachineConfig)
     with initialize_config_dir(config_dir=CONF_DIR, version_base="1.3"):
         yield
 
@@ -294,3 +296,37 @@ def test_missing_expert_data_falls_back_to_empty(tmp_path: Path, monkeypatch: py
 
     assert memory.expert_data == []
     assert len(memory) == 0
+
+
+@pytest.mark.parametrize(
+    "config_name, model, required",
+    [
+        pytest.param("human_vs_machine", HumanVsMachineConfig, [], id="human_vs_machine"),
+        pytest.param("vs_stockfish", VsStockfishConfig, ["stockfish_path=stockfish"], id="vs_stockfish"),
+    ],
+)
+def test_search_display_is_on_by_default_and_can_be_turned_off(
+    config_name: str, model: Type[HumanVsMachineConfig | VsStockfishConfig], required: List[str]
+) -> None:
+    assert from_hydra(model, compose(config_name=config_name, overrides=required)).show_search
+    assert not from_hydra(
+        model, compose(config_name=config_name, overrides=[*required, "show_search=false"])
+    ).show_search
+
+
+def test_move_selection_defaults_to_visits_and_rejects_unknown_values() -> None:
+    assert from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine")).move_selection == "visits"
+    q_config = compose(config_name="vs_stockfish", overrides=["stockfish_path=stockfish", "move_selection=q"])
+    assert from_hydra(VsStockfishConfig, q_config).move_selection == "q"
+
+    with pytest.raises(ValidationError, match="move_selection"):
+        from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine", overrides=["move_selection=value"]))
+
+
+def test_human_vs_machine_rollouts_are_set_from_the_command_line() -> None:
+    assert from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine")) == HumanVsMachineConfig()
+
+    config = from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine", overrides=["num_rollouts=500"]))
+
+    assert config.num_rollouts == 500
+    assert config.network_path == "neural_nets/example_network.pt"

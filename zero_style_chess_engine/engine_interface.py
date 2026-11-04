@@ -2,15 +2,20 @@
 import chess
 import chess.svg
 from neural_nets.conv_net import ChessNet
-from zero_style_chess_engine.config import TrainingConfig
+from zero_style_chess_engine.config import MoveSelection, TrainingConfig
 from zero_style_chess_engine.evaluator import Evaluator
 from zero_style_chess_engine.mcts import MCTS
+from zero_style_chess_engine.search_insights import SearchSummary, summarise_search
 from multiprocessing import Event, Queue
-from typing import Tuple
+from typing import Callable, Optional, Tuple
+import time
 
 
 class EngineInterface:
-    def __init__(self, network_path: str, num_rollouts: int = 2000) -> None:
+    # Rollouts between progress reports during a search
+    progress_interval = 100
+
+    def __init__(self, network_path: str, num_rollouts: int = 2000, move_selection: MoveSelection = "visits") -> None:
         # Initialize your neural network and engine components.
         self.chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
         self.chess_net.load_network(network_path)
@@ -45,6 +50,7 @@ class EngineInterface:
         self.current_board = chess.Board()
         self.mcts.reset(start_state=self.current_board.fen())
         self.rollouts = num_rollouts
+        self.move_selection: MoveSelection = move_selection
 
         self.evaluator.start()
 
@@ -86,12 +92,26 @@ class EngineInterface:
             return True
         return False
 
-    def get_engine_move(self) -> Tuple[str, str]:
-        """Perform a search using the specified number of rollouts and return the engine move and new FEN."""
-        # Do tree search and then tree
-        self.mcts.search(self.rollouts)
-        node, move, move_idx = self.mcts.select_greedy()
-        print(f"Move chosen with Q of: {self.mcts.root.Qs[move_idx]}")
+    def get_engine_move(self, on_progress: Optional[Callable[[SearchSummary], None]] = None) -> Tuple[str, str]:
+        """
+        Perform a search using the specified number of rollouts and return the engine move and new FEN.
+        :param on_progress: called from this thread every progress_interval rollouts, and once at the end of the search
+        """
+        start_time = time.perf_counter()
+        rollouts_done = 0
+        while rollouts_done < self.rollouts and not self.mcts.stop_event.is_set():
+            # Chunked searches run the same rollouts as one search: the tree carries everything between them
+            chunk = min(self.progress_interval, self.rollouts - rollouts_done)
+            self.mcts.search(chunk)
+            rollouts_done += chunk
+            if on_progress is not None:
+                on_progress(summarise_search(self.mcts.root, rollouts_done, time.perf_counter() - start_time))
+
+        node, move, move_idx = self.mcts.select_greedy(self.move_selection)
+        print(
+            f"Move chosen by {self.move_selection}: Q {self.mcts.root.Qs[move_idx]:.3f}, "
+            f"{int(self.mcts.root.Ns[move_idx])} visits"
+        )
 
         # Convert to Python chess format
         self.current_board.push(chess.Move.from_uci(move))

@@ -1,0 +1,13 @@
+# Defaults live in zero_style_chess_engine/config/models.py (HumanVsMachineConfig) and reach Hydra through
+# register_defaults (zero_style_chess_engine/config/hydra.py).
+# Add a key here only to override a default deliberately.
+# No Hydra output folder, no log file: the script runs in the current directory as before.
+defaults:
+  - human_vs_machine_defaults
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .

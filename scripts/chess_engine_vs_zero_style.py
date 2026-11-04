@@ -2,7 +2,7 @@ import sys
 import math
 import threading
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import pygame
 import chess
@@ -12,6 +12,8 @@ from omegaconf import DictConfig
 
 from zero_style_chess_engine.config import VsStockfishConfig, check_paths_exist, from_hydra, register_defaults
 from zero_style_chess_engine.engine_interface import EngineInterface
+from zero_style_chess_engine.search_insights import SearchSummary
+from scripts.search_panel import PANEL_WIDTH, SearchPanel, draw_candidate_arrows
 
 register_defaults("vs_stockfish_defaults", VsStockfishConfig)
 
@@ -34,7 +36,8 @@ def main(hydra_config: DictConfig) -> None:
     BOARD_SIZE = 400
     SQUARE_SIZE = BOARD_SIZE // 8
     MARGIN = 20
-    WINDOW_W = BOARD_SIZE + 2 * MARGIN
+    PANEL_X = BOARD_SIZE + 2 * MARGIN  # Search panel (if shown) to the right of the board
+    WINDOW_W = PANEL_X + PANEL_WIDTH + MARGIN if config.show_search else BOARD_SIZE + 2 * MARGIN
     WINDOW_H = BOARD_SIZE + 2 * MARGIN
     FPS = 30
 
@@ -47,7 +50,9 @@ def main(hydra_config: DictConfig) -> None:
 
     # ---- Engine Setup ----
     # Your network-based engine (we'll play White)
-    net_engine = EngineInterface(network_path=config.network_path, num_rollouts=config.num_rollouts)
+    net_engine = EngineInterface(
+        network_path=config.network_path, num_rollouts=config.num_rollouts, move_selection=config.move_selection
+    )
 
     # Stockfish (Black).  Adjust to your binary path:
     SF_PATH = config.stockfish_path
@@ -70,6 +75,13 @@ def main(hydra_config: DictConfig) -> None:
     # Thread-safe thinking flag
     thinking = False
 
+    # Latest snapshot of the network's search, set by the game thread
+    search_summary: Optional[SearchSummary] = None
+
+    def show_search_progress(summary: SearchSummary) -> None:
+        nonlocal search_summary
+        search_summary = summary
+
     # Utility: pixel center of a square index
     def square_center(sq: chess.Square) -> Tuple[float, float]:
         file = chess.square_file(sq)
@@ -80,14 +92,17 @@ def main(hydra_config: DictConfig) -> None:
 
     # Background game loop
     def play_game() -> None:
-        nonlocal thinking, arrows
+        nonlocal thinking, arrows, search_summary
         while not board.is_game_over():
             thinking = True
 
             if board.turn:
                 # White: your network
                 # get_engine_move() should both return AND apply internally
-                uci_move, _ = net_engine.get_engine_move()
+                search_summary = None  # The last summary is for an earlier position
+                uci_move, _ = net_engine.get_engine_move(
+                    on_progress=show_search_progress if config.show_search else None
+                )
                 mv = chess.Move.from_uci(uci_move)
                 board.push(mv)
                 if len(arrows) == 2:
@@ -116,6 +131,7 @@ def main(hydra_config: DictConfig) -> None:
     pygame.display.set_caption("Network vs Stockfish")
     piece_font = pygame.font.SysFont("DejaVu Sans", 36, bold=True)
     status_font = pygame.font.SysFont("Arial", 24)
+    search_panel = SearchPanel(pygame.Rect(PANEL_X, MARGIN, PANEL_WIDTH, BOARD_SIZE)) if config.show_search else None
     clock = pygame.time.Clock()
 
     # Start the game thread
@@ -155,6 +171,12 @@ def main(hydra_config: DictConfig) -> None:
             p2 = (b[0] - h * math.cos(ang + math.pi / 6), b[1] - h * math.sin(ang + math.pi / 6))
             pygame.draw.line(screen, c, b, p1, 4)
             pygame.draw.line(screen, c, b, p2, 4)
+
+        # While the network thinks (it plays White), show the moves it is weighing
+        if thinking and board.turn == chess.WHITE:
+            draw_candidate_arrows(screen, search_summary, square_center)
+        if search_panel is not None:
+            search_panel.draw(screen, search_summary)
 
         # Status line
         status = "Thinking..." if thinking else f"Result: {board.result()}" if board.is_game_over() else ""

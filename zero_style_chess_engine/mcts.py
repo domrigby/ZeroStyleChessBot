@@ -5,7 +5,7 @@ from multiprocessing import Queue, synchronize
 from queue import Empty
 from typing import List, Dict, Optional, Tuple
 
-from zero_style_chess_engine.config import SearchConfig
+from zero_style_chess_engine.config import MoveSelection, SearchConfig
 from zero_style_chess_engine.messages import EvalRequest, EvalResult
 import chess_moves
 from enum import Enum
@@ -83,6 +83,9 @@ class Node:
         # State value
         self.V: float = 0
         self.R: float = 0
+
+        # The network's value of this state; V is overwritten by backpropagation, this is kept for inspection
+        self.net_value: Optional[float] = None
 
         # Set a flag saying it has not been processed yet
         self.awaiting_processing: bool = False
@@ -389,6 +392,7 @@ class MCTS:
 
             # Update node value
             node.V = result.value
+            node.net_value = result.value
 
             # Parameters for Dirichlet noise
             alpha = self.search_config.dirichlet_alpha  # Dirichlet distribution parameter
@@ -430,16 +434,16 @@ class MCTS:
 
         return self.root.child_nodes[chosen_move], self.root.moves[chosen_move], chosen_move
 
-    def select_greedy(self) -> Tuple[Node, str, int]:
+    def select_greedy(self, by: MoveSelection = "visits") -> Tuple[Node, str, int]:
         """
-        Select the child of the root with the highest Q
-        :return:
+        Select the child of the root with the most visits, or with the highest Q among visited children. Ties are
+        broken at random. Visits is the robust choice: the search only keeps visiting a move whose Q holds up
         """
-        local_Qs = np.copy(self.root.Qs)
-        legit_moves = self.root.Ns > 0
-        local_Qs[~legit_moves] = -np.inf
-        q_max = np.max(local_Qs)
-        max_idxs = np.where(local_Qs == q_max)[0]
+        if by == "visits":
+            scores = self.root.Ns
+        else:
+            scores = np.where(self.root.Ns > 0, self.root.Qs, -np.inf)
+        max_idxs = np.flatnonzero(scores == scores.max())
         chosen_move = np.random.choice(max_idxs)
         return self.root.child_nodes[chosen_move], self.root.moves[chosen_move], chosen_move
 

@@ -34,7 +34,11 @@ scripts/download_weights.sh    # downloads the pretrained network to neural_nets
 uv run python -m scripts.human_vs_machine
 ```
 Drag a piece to its target square, then press **Confirm Move**. The engine's reply is drawn as a blue arrow. It
-searches 2000 MCTS simulations per move: about 7 s on an Apple-silicon laptop CPU, longer on slower machines.
+searches 2000 MCTS simulations per move: about 7 s on an Apple-silicon laptop CPU, longer on slower machines. Change
+that with `num_rollouts=500`, or the weights with `network_path=PATH`. While it thinks, green arrows show the moves it
+is weighing; the side panel shows its evaluation, top candidates (visits, Q, network prior) and expected line. Hide
+both with `show_search=false` (also accepted by `chess_engine_vs_zero_style`). The engine plays its most visited
+move; `move_selection=q` makes it play the move with the highest searched value instead.
 
 **Run a short training job on CPU:**
 ```bash

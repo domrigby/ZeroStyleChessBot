@@ -3,9 +3,13 @@ Typed, validated configuration models. Defaults live here; the YAML files in con
 deliberate overrides.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+# How the engine picks a move after searching. Most visited is the robust choice: a high Q on a few visits is mostly noise
+MoveSelection = Literal["visits", "q"]
 
 
 class _Config(BaseModel):
@@ -92,11 +96,32 @@ class SupervisedConfig(_Config):
     init_lr: float = Field(1e-3, gt=0, description="Initial learning rate (OneCycleLR peaks at 5x this)")
 
 
+class HumanVsMachineConfig(_Config):
+    """Configuration for human_vs_machine.py."""
+
+    network_path: str = Field("neural_nets/example_network.pt", description="Weights the engine plays with")
+    num_rollouts: int = Field(2000, ge=1, description="MCTS simulations per engine move")
+    move_selection: MoveSelection = Field(
+        "visits",
+        description="How the engine picks its move after searching: 'visits' (most visited) or 'q' (highest value)",
+    )
+    show_search: bool = Field(
+        True, description="Show the engine's search: a side panel of statistics and arrows for the moves it is weighing"
+    )
+
+
 class VsStockfishConfig(_Config):
     """Configuration for chess_engine_vs_zero_style.py."""
 
     stockfish_path: str = Field(description="Path to the Stockfish binary")
     network_path: str = Field("neural_nets/example_network.pt", description="Weights the network plays with")
     num_rollouts: int = Field(2000, ge=1, description="MCTS simulations per network move")
+    move_selection: MoveSelection = Field(
+        "visits",
+        description="How the engine picks its move after searching: 'visits' (most visited) or 'q' (highest value)",
+    )
+    show_search: bool = Field(
+        True, description="Show the engine's search: a side panel of statistics and arrows for the moves it is weighing"
+    )
     stockfish_elo: int = Field(1600, ge=1, description="Elo Stockfish is capped at (UCI_Elo)")
     stockfish_move_time: float = Field(1.0, gt=0, description="Seconds Stockfish thinks per move")

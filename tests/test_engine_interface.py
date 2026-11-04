@@ -3,7 +3,7 @@ import multiprocessing.queues
 import queue
 import threading
 from multiprocessing import Queue
-from typing import Any, cast
+from typing import Any, List, cast
 
 import chess
 
@@ -12,6 +12,7 @@ from tests.test_search import InstantEvaluator
 from zero_style_chess_engine.engine_interface import EngineInterface
 from zero_style_chess_engine.evaluator import Evaluator
 from zero_style_chess_engine.mcts import MCTS
+from zero_style_chess_engine.search_insights import SearchSummary
 
 AGENT_ID = 0
 NUM_ROLLOUTS = 32
@@ -64,6 +65,7 @@ def _engine_with_instant_evaluator(rollouts: int) -> EngineInterface:
     engine.mcts.reset(KINGS_ONLY_FEN)
     engine.current_board = chess.Board(KINGS_ONLY_FEN)
     engine.rollouts = rollouts
+    engine.move_selection = "visits"
     return engine
 
 
@@ -91,3 +93,14 @@ def test_unsearched_reply_starts_a_fresh_tree_from_the_board() -> None:
 
     assert engine.mcts.root.state == engine.current_board.fen()
     assert engine.mcts.root.Ns.sum() == 0
+
+
+def test_search_progress_is_reported_in_chunks_ending_with_the_full_search() -> None:
+    engine = _engine_with_instant_evaluator(rollouts=250)
+    start_fen = engine.mcts.root.state
+    summaries: List[SearchSummary] = []
+
+    engine.get_engine_move(on_progress=summaries.append)
+
+    assert [summary.rollouts_this_search for summary in summaries] == [100, 200, 250]
+    assert all(summary.fen == start_fen for summary in summaries)

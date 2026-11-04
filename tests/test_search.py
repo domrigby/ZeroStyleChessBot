@@ -197,3 +197,44 @@ def test_revisiting_a_checkmate_backs_up_the_win_every_time() -> None:
     # it stays at its first one or two values (0.75 here) however many times the mate is revisited
     assert tree.root.Ns[mate_idx] >= 20
     assert tree.root.Qs[mate_idx] > 0.9
+
+
+def _root_where_most_visited_and_highest_q_differ() -> Tuple[MCTS, int, int]:
+    """A searched start position with the visits and Qs rewritten: one well-tested move and one lucky long shot"""
+    tree, _ = _make_tree(START_FEN)
+    tree.search(number_of_expansions=NUM_ROLLOUTS)
+    _drain(tree)
+    well_tested, long_shot = sorted(tree.root.child_nodes)[:2]
+    tree.root.Ns[:] = np.where(tree.root.Ns > 0, 1, 0)
+    tree.root.Qs[:] = 0.0
+    tree.root.Ns[well_tested], tree.root.Qs[well_tested] = 150, 0.2
+    tree.root.Ns[long_shot], tree.root.Qs[long_shot] = 2, 0.9
+    return tree, well_tested, long_shot
+
+
+def test_greedy_selection_by_visits_ignores_a_lucky_high_q() -> None:
+    tree, well_tested, _ = _root_where_most_visited_and_highest_q_differ()
+
+    node, move, move_idx = tree.select_greedy("visits")
+
+    assert move_idx == well_tested
+    assert (node, move) == (tree.root.child_nodes[well_tested], tree.root.moves[well_tested])
+
+
+def test_greedy_selection_by_q_takes_the_highest_value() -> None:
+    tree, _, long_shot = _root_where_most_visited_and_highest_q_differ()
+
+    _, _, move_idx = tree.select_greedy("q")
+
+    assert move_idx == long_shot
+
+
+def test_greedy_selection_by_q_never_picks_an_unvisited_move() -> None:
+    tree, _ = _make_tree(START_FEN)
+    tree.search(number_of_expansions=3)
+    _drain(tree)
+    tree.root.Qs[tree.root.Ns == 0] = 1.0  # Unvisited moves' Qs mean nothing; make them tempting
+
+    _, _, move_idx = tree.select_greedy("q")
+
+    assert tree.root.Ns[move_idx] > 0
