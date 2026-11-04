@@ -76,6 +76,9 @@ class Node:
         self.moves = legal_moves
         self.Qs = np.zeros(self.number_legal_moves)
         self.Ns = np.zeros(self.number_legal_moves)
+        # Values backed up through each move. Ns also counts rollouts whose evaluation is still in flight, so Qs are
+        # averaged over these instead
+        self.backed_up = np.zeros(self.number_legal_moves)
         self.Ps = np.ones(self.number_legal_moves) / self.number_legal_moves
         self.virtual_losses = np.zeros(self.number_legal_moves)
         self.child_nodes: Dict[int, Node] = {}
@@ -338,7 +341,9 @@ class MCTS:
             # Increment the visit count and update the total reward
             new_Q = node.R + gamma_factor**idx * reward
 
-            node.Qs[move_idx] = (node.Ns[move_idx] * node.Qs[move_idx] + new_Q) / (node.Ns[move_idx] + 1)
+            # Running mean of the values backed up through this move
+            node.backed_up[move_idx] += 1
+            node.Qs[move_idx] += (new_Q - node.Qs[move_idx]) / node.backed_up[move_idx]
 
             # Player will choose their best move... maximum Q
             Qs = node.Qs[node.Ns > 0]

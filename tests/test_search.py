@@ -4,6 +4,7 @@ import queue
 from typing import Any, Iterator, List, Tuple, cast
 
 import numpy as np
+import pytest
 
 from zero_style_chess_engine.messages import EvalRequest, EvalResult
 from zero_style_chess_engine.mcts import MCTS, Node
@@ -193,10 +194,22 @@ def test_revisiting_a_checkmate_backs_up_the_win_every_time() -> None:
     _drain(tree)
 
     mate_idx = tree.root.moves.index(MATING_MOVE)
-    # Q is the sum of backed-up values over N + 1, so a win on every visit tends to 1. Without the revisit backup
-    # it stays at its first one or two values (0.75 here) however many times the mate is revisited
+    # Q is the mean of the values backed up through the move: a win every visit is exactly 1, however many visits
     assert tree.root.Ns[mate_idx] >= 20
-    assert tree.root.Qs[mate_idx] > 0.9
+    assert tree.root.Qs[mate_idx] == 1.0
+
+
+def test_q_averages_only_backed_up_values_while_other_visits_are_in_flight() -> None:
+    tree, _ = _make_tree(START_FEN)
+    root, move_idx = tree.root, 0
+    # Three rollouts selected the move (selection counts them in Ns); their evaluations come back one at a time
+    root.Ns[move_idx] += 3
+
+    tree.backpropagation([(root, move_idx)], observed_reward=-0.6)
+    assert root.Qs[move_idx] == pytest.approx(0.6)
+
+    tree.backpropagation([(root, move_idx)], observed_reward=-0.2)
+    assert root.Qs[move_idx] == pytest.approx(0.4)
 
 
 def _root_where_most_visited_and_highest_q_differ() -> Tuple[MCTS, int, int]:
