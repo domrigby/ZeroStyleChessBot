@@ -174,6 +174,7 @@ def make_player(
             value_function=config.value_function,
             num_rollouts=config.num_rollouts,
             move_selection=config.move_selection,
+            c_puct=config.c_puct,
         )
         return ZeroStylePlayer(engine, name, on_progress)
     if isinstance(config, RandomPlayerConfig):

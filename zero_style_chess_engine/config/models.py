@@ -15,9 +15,9 @@ MoveSelection = Literal["visits", "q"]
 # is weighing for you, so it is no hint; "analysis" shows everything
 DisplayMode = Literal["play", "analysis"]
 
-# Value function of the baseline MCTS player in place of the network's: "zero" (only game ends score) or "material"
-# (material balance, P=1 N=B=3 R=5 Q=9)
-HeuristicValue = Literal["zero", "material"]
+# Value function of the baseline MCTS player in place of the network's: "zero" (only game ends score), "material"
+# (material balance, P=1 N=B=3 R=5 Q=9) or "pesto" (PeSTO's piece-square evaluation once the captures settle)
+HeuristicValue = Literal["zero", "material", "pesto"]
 
 
 class _Config(BaseModel):
@@ -143,9 +143,14 @@ class HeuristicMctsPlayerConfig(_Config):
 
     type: Literal["heuristic_mcts"] = "heuristic_mcts"
     value_function: HeuristicValue = Field(
-        "material", description="'material' (material balance) or 'zero' (only checkmates and draws score)"
+        "material",
+        description="'material' (material balance), 'pesto' (piece-square evaluation once the captures settle) or "
+        "'zero' (only checkmates and draws score)",
     )
     num_rollouts: int = Field(2000, ge=1, description="MCTS simulations per move")
+    c_puct: float = Field(
+        3.0, gt=0, description="PUCT exploration constant; the default is the network's (search.c_puct in training)"
+    )
     move_selection: MoveSelection = Field(
         "visits",
         description="How the engine picks its move after searching: 'visits' (most visited) or 'q' (highest value)",

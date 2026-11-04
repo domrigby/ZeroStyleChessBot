@@ -457,3 +457,12 @@ def test_heuristic_mcts_player_defaults_to_material_and_is_picked_per_side() -> 
     assert HeuristicMctsPlayerConfig().value_function == "material"
     with pytest.raises(ValidationError, match="value_function"):
         compose_engine_vs_engine(["player@black=heuristic_mcts", "black.value_function=mobility"])
+
+
+def test_heuristic_pesto_preset_is_a_heuristic_mcts_player_with_the_pesto_value() -> None:
+    config = compose_engine_vs_engine(
+        ["player@white=heuristic_pesto", "player@black=heuristic_pesto", "black.c_puct=1.5"]
+    )
+
+    assert config.white == HeuristicMctsPlayerConfig(value_function="pesto", num_rollouts=2000, c_puct=3.0)
+    assert config.black == HeuristicMctsPlayerConfig(value_function="pesto", num_rollouts=2000, c_puct=1.5)

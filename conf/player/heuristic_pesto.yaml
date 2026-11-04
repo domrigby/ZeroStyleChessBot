@@ -1,0 +1,6 @@
+# A decent heuristic MCTS baseline: PeSTO's piece-square evaluation once the captures settle, with uniform priors.
+# Pick it per side: player@black=heuristic_pesto. Fields left out take HeuristicMctsPlayerConfig's defaults.
+type: heuristic_mcts
+value_function: pesto
+num_rollouts: 2000
+c_puct: 3.0

@@ -27,17 +27,20 @@ class EngineInterface:
         num_rollouts: int = 2000,
         move_selection: MoveSelection = "visits",
         value_function: Optional[HeuristicValue] = None,
+        c_puct: Optional[float] = None,
     ) -> None:
         """
         :param network_path: weights to search with: positions are evaluated by the network, in an evaluator process
         :param value_function: instead of a network, search with uniform priors and this hand-written value function,
             answered in this process (a baseline player). Give exactly one of network_path and value_function
+        :param c_puct: PUCT exploration constant; None keeps training's (search.c_puct)
         """
         if (network_path is None) == (value_function is None):
             raise ValueError("Give exactly one of network_path and value_function")
 
         # Search constants, lag and evaluator batch size as in training
         config = TrainingConfig()
+        search_config = config.search if c_puct is None else config.search.model_copy(update={"c_puct": c_puct})
         self.stop_event = Event()
         self.evaluator: Optional[Evaluator] = None
         eval_request_queue: Queue
@@ -56,7 +59,7 @@ class EngineInterface:
             eval_result_queue,
             agent_id=0,
             stop_event=self.stop_event,
-            search_config=config.search,
+            search_config=search_config,
             maximum_lag=config.maximum_lag,
             verbose=True,
         )
