@@ -6,16 +6,20 @@ import pandas as pd
 import pytest
 from hydra import compose, initialize_config_dir
 from hydra.errors import ConfigCompositionException
+from omegaconf import OmegaConf
 from omegaconf.errors import MissingMandatoryValue
 from pydantic import BaseModel, ValidationError
 
 from neural_nets.data.fen_chess_puzzles.curriculum import START_STATE, load_curricula
 from zero_style_chess_engine.config import (
+    EngineVsEngineConfig,
+    HeuristicMctsPlayerConfig,
     HumanVsMachineConfig,
     SearchConfig,
     SupervisedConfig,
     TrainingConfig,
-    VsStockfishConfig,
+    UciPlayerConfig,
+    ZeroStylePlayerConfig,
     check_paths_exist,
     from_hydra,
     register_defaults,
@@ -64,7 +68,10 @@ EXPECTED_TRAINING_DEFAULTS: Dict[str, Any] = {
 def hydra_conf() -> Iterator[None]:
     register_defaults("training_defaults", TrainingConfig)
     register_defaults("supervised_defaults", SupervisedConfig)
-    register_defaults("vs_stockfish_defaults", VsStockfishConfig)
+    register_defaults("engine_vs_engine_defaults", EngineVsEngineConfig)
+    register_defaults("zero_style", ZeroStylePlayerConfig, group="player")
+    register_defaults("heuristic_mcts", HeuristicMctsPlayerConfig, group="player")
+    register_defaults("uci", UciPlayerConfig, group="player")
     register_defaults("human_vs_machine_defaults", HumanVsMachineConfig)
     with initialize_config_dir(config_dir=CONF_DIR, version_base="1.3"):
         yield
@@ -203,7 +210,7 @@ def test_search_validation_applies_through_hydra() -> None:
     "config_name, model, required_field",
     [
         pytest.param("supervised", SupervisedConfig, "data_dir", id="supervised"),
-        pytest.param("vs_stockfish", VsStockfishConfig, "stockfish_path", id="vs_stockfish"),
+        pytest.param("engine_vs_engine", EngineVsEngineConfig, "black.engine_path", id="engine_vs_engine"),
     ],
 )
 def test_required_field_must_be_given(
@@ -214,16 +221,17 @@ def test_required_field_must_be_given(
 
     config = from_hydra(model, compose(config_name=config_name, overrides=[f"{required_field}={tmp_path}"]))
 
-    assert getattr(config, required_field) == str(tmp_path)
+    assert OmegaConf.select(OmegaConf.create(config.model_dump()), required_field) == str(tmp_path)
 
 
 def test_previously_hard_coded_script_values_are_defaults() -> None:
     supervised = SupervisedConfig(data_dir="data")
-    vs_stockfish = VsStockfishConfig(stockfish_path="stockfish")
+    zero_style = ZeroStylePlayerConfig()
+    uci = UciPlayerConfig(engine_path="stockfish")
 
     assert (supervised.batch_size, supervised.init_lr) == (64, 1e-3)
-    assert (vs_stockfish.network_path, vs_stockfish.num_rollouts) == ("neural_nets/example_network.pt", 2000)
-    assert (vs_stockfish.stockfish_elo, vs_stockfish.stockfish_move_time) == (1600, 1.0)
+    assert (zero_style.network_path, zero_style.num_rollouts) == ("neural_nets/example_network.pt", 2000)
+    assert (uci.elo, uci.move_time) == (1600, 1.0)
 
 
 def test_check_paths_exist_reports_every_missing_path(tmp_path: Path) -> None:
@@ -302,11 +310,11 @@ def test_missing_expert_data_falls_back_to_empty(tmp_path: Path, monkeypatch: py
     "config_name, model, required",
     [
         pytest.param("human_vs_machine", HumanVsMachineConfig, [], id="human_vs_machine"),
-        pytest.param("vs_stockfish", VsStockfishConfig, ["stockfish_path=stockfish"], id="vs_stockfish"),
+        pytest.param("engine_vs_engine", EngineVsEngineConfig, ["black.engine_path=stockfish"], id="engine_vs_engine"),
     ],
 )
 def test_search_display_is_on_by_default_and_can_be_turned_off(
-    config_name: str, model: Type[HumanVsMachineConfig | VsStockfishConfig], required: List[str]
+    config_name: str, model: Type[HumanVsMachineConfig | EngineVsEngineConfig], required: List[str]
 ) -> None:
     assert from_hydra(model, compose(config_name=config_name, overrides=required)).show_search
     assert not from_hydra(
@@ -316,8 +324,11 @@ def test_search_display_is_on_by_default_and_can_be_turned_off(
 
 def test_move_selection_defaults_to_visits_and_rejects_unknown_values() -> None:
     assert from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine")).move_selection == "visits"
-    q_config = compose(config_name="vs_stockfish", overrides=["stockfish_path=stockfish", "move_selection=q"])
-    assert from_hydra(VsStockfishConfig, q_config).move_selection == "q"
+    q_config = compose(
+        config_name="engine_vs_engine", overrides=["black.engine_path=stockfish", "white.move_selection=q"]
+    )
+    white = from_hydra(EngineVsEngineConfig, q_config).white
+    assert isinstance(white, ZeroStylePlayerConfig) and white.move_selection == "q"
 
     with pytest.raises(ValidationError, match="move_selection"):
         from_hydra(HumanVsMachineConfig, compose(config_name="human_vs_machine", overrides=["move_selection=value"]))
@@ -346,3 +357,95 @@ def test_human_vs_machine_rollouts_are_set_from_the_command_line() -> None:
 
     assert config.num_rollouts == 500
     assert config.network_path == "neural_nets/example_network.pt"
+
+
+def compose_engine_vs_engine(overrides: List[str]) -> EngineVsEngineConfig:
+    return from_hydra(EngineVsEngineConfig, compose(config_name="engine_vs_engine", overrides=overrides))
+
+
+def test_engine_vs_engine_defaults_to_the_network_as_white_against_a_uci_engine() -> None:
+    config = compose_engine_vs_engine(["black.engine_path=stockfish"])
+
+    assert config == EngineVsEngineConfig(white=ZeroStylePlayerConfig(), black=UciPlayerConfig(engine_path="stockfish"))
+
+
+def test_each_side_can_switch_player_type_from_the_command_line() -> None:
+    config = compose_engine_vs_engine(
+        ["player@white=uci", "white.engine_path=lc0", "white.elo=null", "player@black=zero_style"]
+    )
+
+    assert config.white == UciPlayerConfig(engine_path="lc0", elo=None)
+    assert config.black == ZeroStylePlayerConfig()
+
+
+def test_network_can_play_a_different_checkpoint_of_itself() -> None:
+    config = compose_engine_vs_engine(
+        ["player@black=zero_style", "white.network_path=ckpt/a.pt", "black.network_path=ckpt/b.pt"]
+    )
+
+    assert isinstance(config.white, ZeroStylePlayerConfig) and isinstance(config.black, ZeroStylePlayerConfig)
+    assert (config.white.network_path, config.black.network_path) == ("ckpt/a.pt", "ckpt/b.pt")
+
+
+def test_a_field_of_the_other_player_type_is_rejected() -> None:
+    with pytest.raises(ConfigCompositionException):
+        compose_engine_vs_engine(["black.engine_path=stockfish", "white.engine_path=stockfish"])
+    with pytest.raises(ValidationError, match="engine_path"):
+        EngineVsEngineConfig.model_validate(
+            {"white": {"type": "zero_style", "engine_path": "stockfish"}, "black": {"type": "zero_style"}}
+        )
+
+
+def test_unknown_player_type_is_rejected() -> None:
+    with pytest.raises(ConfigCompositionException):
+        compose_engine_vs_engine(["player@black=llm"])
+    with pytest.raises(ValidationError, match="llm"):
+        EngineVsEngineConfig.model_validate({"white": {"type": "zero_style"}, "black": {"type": "llm"}})
+
+
+def test_uci_player_values_are_range_checked() -> None:
+    with pytest.raises(ValidationError, match="move_time"):
+        UciPlayerConfig(engine_path="stockfish", move_time=0)
+    with pytest.raises(ValidationError, match="elo"):
+        UciPlayerConfig(engine_path="stockfish", elo=0)
+
+
+def test_check_paths_exist_reports_nested_missing_paths(tmp_path: Path) -> None:
+    missing_engine = str(tmp_path / "no_such_engine")
+    config = EngineVsEngineConfig(
+        white=ZeroStylePlayerConfig(network_path=str(tmp_path / "missing.pt")),
+        black=UciPlayerConfig(engine_path=missing_engine),
+    )
+
+    with pytest.raises(FileNotFoundError) as error:
+        check_paths_exist(config)
+
+    assert f"black.engine_path={missing_engine}" in str(error.value)
+    assert "white.network_path=" in str(error.value)
+    assert "download_weights.sh" in str(error.value)
+
+
+def test_engine_path_may_be_a_program_on_the_search_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = tmp_path / "fake_engine"
+    engine.touch(mode=0o755)
+    network = tmp_path / "net.pt"
+    network.touch()
+    monkeypatch.setenv("PATH", str(tmp_path))
+    config = EngineVsEngineConfig(
+        white=ZeroStylePlayerConfig(network_path=str(network)), black=UciPlayerConfig(engine_path="fake_engine")
+    )
+
+    check_paths_exist(config)
+
+    # A network path is a file, never looked up on $PATH
+    with pytest.raises(FileNotFoundError, match="white.network_path"):
+        check_paths_exist(config.model_copy(update={"white": ZeroStylePlayerConfig(network_path="fake_engine")}))
+
+
+def test_heuristic_mcts_player_defaults_to_material_and_is_picked_per_side() -> None:
+    config = compose_engine_vs_engine(["player@black=heuristic_mcts", "black.value_function=zero"])
+
+    assert config.black == HeuristicMctsPlayerConfig(value_function="zero")
+    assert HeuristicMctsPlayerConfig().value_function == "material"
+    with pytest.raises(ValidationError, match="value_function"):
+        compose_engine_vs_engine(["player@black=heuristic_mcts", "black.value_function=mobility"])

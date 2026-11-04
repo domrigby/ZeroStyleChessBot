@@ -1,0 +1,17 @@
+# Defaults live in zero_style_chess_engine/config/models.py (EngineVsEngineConfig, and ZeroStylePlayerConfig and
+# UciPlayerConfig in the `player` group) and reach Hydra through register_defaults
+# (zero_style_chess_engine/config/hydra.py).
+# Pick each side's player on the command line: player@black=zero_style black.network_path=ckpt.pt
+# Add a key here only to override a default deliberately.
+# No Hydra output folder, no log file: the script runs in the current directory as before.
+defaults:
+  - engine_vs_engine_defaults
+  - player@white: zero_style
+  - player@black: uci
+  - override hydra/job_logging: stdout
+  - _self_
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .

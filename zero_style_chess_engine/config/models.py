@@ -3,7 +3,7 @@ Typed, validated configuration models. Defaults live here; the YAML files in con
 deliberate overrides.
 """
 
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -14,6 +14,10 @@ MoveSelection = Literal["visits", "q"]
 # How much of the search to show. "play" draws no arrows and, while the engine ponders on your move, hides the moves it
 # is weighing for you, so it is no hint; "analysis" shows everything
 DisplayMode = Literal["play", "analysis"]
+
+# Value function of the baseline MCTS player in place of the network's: "zero" (only game ends score) or "material"
+# (material balance, P=1 N=B=3 R=5 Q=9)
+HeuristicValue = Literal["zero", "material"]
 
 
 class _Config(BaseModel):
@@ -122,18 +126,55 @@ class HumanVsMachineConfig(_Config):
     )
 
 
-class VsStockfishConfig(_Config):
-    """Configuration for chess_engine_vs_zero_style.py."""
+class ZeroStylePlayerConfig(_Config):
+    """A side played by the zero-style network and MCTS."""
 
-    stockfish_path: str = Field(description="Path to the Stockfish binary")
-    network_path: str = Field("neural_nets/example_network.pt", description="Weights the network plays with")
-    num_rollouts: int = Field(2000, ge=1, description="MCTS simulations per network move")
+    type: Literal["zero_style"] = "zero_style"
+    network_path: str = Field("neural_nets/example_network.pt", description="Weights this side plays with")
+    num_rollouts: int = Field(2000, ge=1, description="MCTS simulations per move")
     move_selection: MoveSelection = Field(
         "visits",
         description="How the engine picks its move after searching: 'visits' (most visited) or 'q' (highest value)",
     )
-    show_search: bool = Field(
-        True, description="Show the engine's search: a side panel of statistics and arrows for the moves it is weighing"
+
+
+class HeuristicMctsPlayerConfig(_Config):
+    """A baseline side: the same MCTS with uniform priors and a hand-written value function instead of the network."""
+
+    type: Literal["heuristic_mcts"] = "heuristic_mcts"
+    value_function: HeuristicValue = Field(
+        "material", description="'material' (material balance) or 'zero' (only checkmates and draws score)"
     )
-    stockfish_elo: int = Field(1600, ge=1, description="Elo Stockfish is capped at (UCI_Elo)")
-    stockfish_move_time: float = Field(1.0, gt=0, description="Seconds Stockfish thinks per move")
+    num_rollouts: int = Field(2000, ge=1, description="MCTS simulations per move")
+    move_selection: MoveSelection = Field(
+        "visits",
+        description="How the engine picks its move after searching: 'visits' (most visited) or 'q' (highest value)",
+    )
+
+
+class UciPlayerConfig(_Config):
+    """A side played by a UCI engine such as Stockfish or Lc0."""
+
+    type: Literal["uci"] = "uci"
+    engine_path: str = Field(description="Path to the engine binary, or its name if it is on $PATH")
+    elo: Optional[int] = Field(
+        1600, ge=1, description="Elo the engine is capped at (UCI_Elo); null plays at full strength"
+    )
+    move_time: float = Field(1.0, gt=0, description="Seconds the engine thinks per move")
+
+
+# One side of an engine-vs-engine game, picked on the command line with player@white=uci / player@black=zero_style
+PlayerConfig = Annotated[
+    Union[ZeroStylePlayerConfig, HeuristicMctsPlayerConfig, UciPlayerConfig], Field(discriminator="type")
+]
+
+
+class EngineVsEngineConfig(_Config):
+    """Configuration for engine_vs_engine.py."""
+
+    white: PlayerConfig = Field(description="The player with the white pieces")
+    black: PlayerConfig = Field(description="The player with the black pieces")
+    show_search: bool = Field(
+        True,
+        description="Show an MCTS side's search: a side panel of statistics and arrows for the moves it is weighing",
+    )

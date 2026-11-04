@@ -2,12 +2,14 @@
 import chess
 import chess.svg
 from neural_nets.conv_net import ChessNet
-from zero_style_chess_engine.config import MoveSelection, TrainingConfig
+from zero_style_chess_engine.config import HeuristicValue, MoveSelection, TrainingConfig
 from zero_style_chess_engine.evaluator import Evaluator
+from zero_style_chess_engine.heuristic_evaluator import HeuristicEvaluator
 from zero_style_chess_engine.mcts import MCTS
 from zero_style_chess_engine.search_insights import SearchSummary, summarise_search
 from multiprocessing import Event, Queue
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, cast
+import queue
 import threading
 import time
 
@@ -19,17 +21,34 @@ class EngineInterface:
     ponder_chunk = 128
     _ponder_thread: Optional[threading.Thread] = None
 
-    def __init__(self, network_path: str, num_rollouts: int = 2000, move_selection: MoveSelection = "visits") -> None:
-        # Initialize your neural network and engine components.
-        self.chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
-        self.chess_net.load_network(network_path)
-        self.chess_net.eval()
+    def __init__(
+        self,
+        network_path: Optional[str] = None,
+        num_rollouts: int = 2000,
+        move_selection: MoveSelection = "visits",
+        value_function: Optional[HeuristicValue] = None,
+    ) -> None:
+        """
+        :param network_path: weights to search with: positions are evaluated by the network, in an evaluator process
+        :param value_function: instead of a network, search with uniform priors and this hand-written value function,
+            answered in this process (a baseline player). Give exactly one of network_path and value_function
+        """
+        if (network_path is None) == (value_function is None):
+            raise ValueError("Give exactly one of network_path and value_function")
 
         # Search constants, lag and evaluator batch size as in training
         config = TrainingConfig()
         self.stop_event = Event()
-        eval_request_queue: Queue = Queue()
-        eval_result_queue: Queue = Queue()
+        self.evaluator: Optional[Evaluator] = None
+        eval_request_queue: Queue
+        eval_result_queue: Queue
+        if value_function is not None:
+            # Answered in this thread, so thread queues: same put/get, no feeder-thread delay
+            results_queue: "queue.Queue[Any]" = queue.Queue()
+            eval_request_queue = cast(Queue, HeuristicEvaluator(results_queue, value_function))
+            eval_result_queue = cast(Queue, results_queue)
+        else:
+            eval_request_queue, eval_result_queue = Queue(), Queue()
 
         # The search runs in this process; only the evaluator is a separate process
         self.mcts = MCTS(
@@ -41,14 +60,18 @@ class EngineInterface:
             maximum_lag=config.maximum_lag,
             verbose=True,
         )
-        self.evaluator = Evaluator(
-            neural_net=self.chess_net,
-            eval_request_queues=[eval_request_queue],
-            weights_queue=Queue(maxsize=1),  # Nothing sends new weights while playing
-            eval_result_queues={self.mcts.agent_id: eval_result_queue},
-            batch_size=config.evaluator_batch_size,
-            stop_event=self.stop_event,
-        )
+        if network_path is not None:
+            chess_net = ChessNet(input_size=[12, 8, 8], output_size=[70, 8, 8], num_repeats=32)
+            chess_net.load_network(network_path)
+            chess_net.eval()
+            self.evaluator = Evaluator(
+                neural_net=chess_net,
+                eval_request_queues=[eval_request_queue],
+                weights_queue=Queue(maxsize=1),  # Nothing sends new weights while playing
+                eval_result_queues={self.mcts.agent_id: eval_result_queue},
+                batch_size=config.evaluator_batch_size,
+                stop_event=self.stop_event,
+            )
 
         # Initialize the board (standard starting position)
         self.current_board = chess.Board()
@@ -56,16 +79,27 @@ class EngineInterface:
         self.rollouts = num_rollouts
         self.move_selection: MoveSelection = move_selection
 
-        self.evaluator.start()
+        if self.evaluator is not None:
+            self.evaluator.start()
 
     def close(self, timeout: float = 10.0) -> None:
         """Stop the evaluator process; otherwise it keeps the program alive."""
         self.stop_pondering()
         self.stop_event.set()
+        if self.evaluator is None:
+            return
         self.evaluator.join(timeout)
         if self.evaluator.is_alive():
             self.evaluator.terminate()
             self.evaluator.join()
+
+    def reset(self, board: chess.Board) -> None:
+        """
+        Start a fresh search tree at the board's position. The board's move history is kept, so a caller can tell
+        later whether a game continues from it
+        """
+        self.current_board = board.copy()
+        self.mcts.reset(start_state=board.fen())
 
     def set_rollouts(self, rollout_count: int) -> None:
         self.rollouts = rollout_count

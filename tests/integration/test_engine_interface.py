@@ -24,6 +24,7 @@ def test_close_stops_evaluator_processes(tmp_path: Path, monkeypatch: pytest.Mon
     torch.save(network.state_dict(), weights_path)
 
     engine = EngineInterface(network_path=str(weights_path))
+    assert engine.evaluator is not None
     assert engine.evaluator.is_alive()
 
     engine.close(timeout=CLOSE_TIMEOUT_SECONDS)

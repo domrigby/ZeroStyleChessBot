@@ -37,7 +37,7 @@ Drag a piece to its target square, then press **Confirm Move**. The engine's rep
 searches 2000 MCTS simulations per move: about 7 s on an Apple-silicon laptop CPU, longer on slower machines. Change
 that with `num_rollouts=500`, or the weights with `network_path=PATH`. The side panel shows its evaluation, top
 candidates (visits, Q, network prior) and expected line; in analysis mode (below) green arrows also show the moves it
-is weighing. Hide both with `show_search=false` (also accepted by `chess_engine_vs_zero_style`). The engine plays its most visited
+is weighing. Hide both with `show_search=false` (also accepted by `engine_vs_engine`). The engine plays its most visited
 move; `move_selection=q` makes it play the move with the highest searched value instead.
 
 While you think, the engine keeps searching your position (pondering), so its reply builds on that search; turn this
@@ -158,7 +158,12 @@ binding, update `stubs/chess_moves.pyi` by hand.
 
 Other entry points:
 - `uv run python -m scripts.supervised_learning data_dir=DIR`: behavioural-cloning pre-training on pickled games.
-- `uv run python -m scripts.chess_engine_vs_zero_style stockfish_path=PATH`: play the network against Stockfish.
+- `uv run python -m scripts.engine_vs_engine black.engine_path=PATH`: play the network (White) against a UCI engine
+  such as Stockfish (Black), capped at `black.elo` (default 1600; `black.elo=null` for full strength, or for engines
+  without `UCI_Elo` such as Lc0). Pick either side's player with `player@white=` / `player@black=` `zero_style` or
+  `uci` or `heuristic_mcts`, e.g. checkpoint vs checkpoint: `player@black=zero_style black.network_path=ckpt/step_5000.pt`.
+  `heuristic_mcts` is a baseline: the same MCTS with uniform priors and a hand-written value function in place of
+  the network, `black.value_function=material` (default; material balance) or `zero` (only game ends score).
 
 ## Future work
 
