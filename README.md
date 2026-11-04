@@ -165,10 +165,11 @@ Other entry points:
 - `uv run python -m scripts.supervised_learning data_dir=DIR`: behavioural-cloning pre-training on pickled games.
 - `uv run python -m scripts.engine_vs_engine black.engine_path=PATH`: play the network (White) against a UCI engine
   such as Stockfish (Black), capped at `black.elo` (default 1600; `black.elo=null` for full strength, or for engines
-  without `UCI_Elo` such as Lc0). Pick either side's player with `player@white=` / `player@black=` `zero_style` or
-  `uci` or `heuristic_mcts`, e.g. checkpoint vs checkpoint: `player@black=zero_style black.network_path=ckpt/step_5000.pt`.
+  without `UCI_Elo` such as Lc0). Pick either side's player with `player@white=` / `player@black=` `zero_style`,
+  `uci`, `heuristic_mcts` or `random`, e.g. checkpoint vs checkpoint: `player@black=zero_style black.network_path=ckpt/step_5000.pt`.
   `heuristic_mcts` is a baseline: the same MCTS with uniform priors and a hand-written value function in place of
   the network, `black.value_function=material` (default; material balance) or `zero` (only game ends score).
+  `random` plays a uniformly random legal move: `player@black=random` pits the network against it.
 
 ## Future work
 

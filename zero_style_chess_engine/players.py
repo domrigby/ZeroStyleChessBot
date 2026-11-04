@@ -3,6 +3,7 @@ Players: anything that picks a move for one side of a game, behind one interface
 plays two of them against each other (play_game). The loop holds no UI code, so a headless match runner can reuse it.
 """
 
+import random
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
 
@@ -12,6 +13,7 @@ import chess.engine
 from zero_style_chess_engine.config import (
     HeuristicMctsPlayerConfig,
     PlayerConfig,
+    RandomPlayerConfig,
     UciPlayerConfig,
     ZeroStylePlayerConfig,
 )
@@ -140,6 +142,20 @@ class UciPlayer:
         self.engine.quit()
 
 
+class RandomPlayer:
+    """Plays a uniformly random legal move: the floor any engine should beat"""
+
+    def __init__(self, name: str, rng: Optional[random.Random] = None) -> None:
+        self.name = name
+        self.rng = rng or random.Random()
+
+    def choose_move(self, board: chess.Board) -> chess.Move:
+        return self.rng.choice(list(board.legal_moves))
+
+    def close(self) -> None:
+        pass
+
+
 def make_player(
     config: PlayerConfig, name: str, on_progress: Optional[Callable[[SearchSummary], None]] = None
 ) -> Player:
@@ -160,4 +176,6 @@ def make_player(
             move_selection=config.move_selection,
         )
         return ZeroStylePlayer(engine, name, on_progress)
+    if isinstance(config, RandomPlayerConfig):
+        return RandomPlayer(name)
     return UciPlayer(config, name)

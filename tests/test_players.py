@@ -1,3 +1,4 @@
+import random
 import shutil
 from typing import Any, Dict, List, Sequence
 
@@ -6,13 +7,15 @@ import chess.engine
 import pytest
 
 from tests.test_engine_interface import KINGS_ONLY_FEN, _engine_with_instant_evaluator
-from zero_style_chess_engine.config import UciPlayerConfig
+from zero_style_chess_engine.config import RandomPlayerConfig, UciPlayerConfig
 from zero_style_chess_engine.players import (
     GameResult,
     IllegalMoveError,
     PlayerResignedError,
+    RandomPlayer,
     UciPlayer,
     ZeroStylePlayer,
+    make_player,
     play_game,
 )
 
@@ -239,3 +242,24 @@ def test_stockfish_plays_a_short_game_against_itself() -> None:
         black.close()
 
     assert result.result in ("1-0", "1/2-1/2")
+
+
+def test_random_player_plays_random_games_to_the_end() -> None:
+    # Legal throughout (play_game raises otherwise) and ends with a recognised result
+    for seed in range(5):
+        white, black = RandomPlayer("white", random.Random(seed)), RandomPlayer("black", random.Random(seed + 100))
+        result = play_game(white, black)
+        assert result.result in {"1-0", "0-1", "1/2-1/2"}
+
+
+def test_random_player_picks_among_all_legal_moves() -> None:
+    board = chess.Board()
+    player = RandomPlayer("white", random.Random(0))
+
+    moves = {player.choose_move(board) for _ in range(400)}
+
+    assert moves == set(board.legal_moves)  # All 20 opening moves, given enough draws
+
+
+def test_make_player_builds_a_random_player() -> None:
+    assert isinstance(make_player(RandomPlayerConfig(), "black"), RandomPlayer)

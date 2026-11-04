@@ -163,9 +163,16 @@ class UciPlayerConfig(_Config):
     move_time: float = Field(1.0, gt=0, description="Seconds the engine thinks per move")
 
 
+class RandomPlayerConfig(_Config):
+    """A floor baseline: a uniformly random legal move every turn."""
+
+    type: Literal["random"] = "random"
+
+
 # One side of an engine-vs-engine game, picked on the command line with player@white=uci / player@black=zero_style
 PlayerConfig = Annotated[
-    Union[ZeroStylePlayerConfig, HeuristicMctsPlayerConfig, UciPlayerConfig], Field(discriminator="type")
+    Union[ZeroStylePlayerConfig, HeuristicMctsPlayerConfig, UciPlayerConfig, RandomPlayerConfig],
+    Field(discriminator="type"),
 ]
 
 

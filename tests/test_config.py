@@ -15,6 +15,7 @@ from zero_style_chess_engine.config import (
     EngineVsEngineConfig,
     HeuristicMctsPlayerConfig,
     HumanVsMachineConfig,
+    RandomPlayerConfig,
     SearchConfig,
     SupervisedConfig,
     TrainingConfig,
@@ -72,6 +73,7 @@ def hydra_conf() -> Iterator[None]:
     register_defaults("zero_style", ZeroStylePlayerConfig, group="player")
     register_defaults("heuristic_mcts", HeuristicMctsPlayerConfig, group="player")
     register_defaults("uci", UciPlayerConfig, group="player")
+    register_defaults("random", RandomPlayerConfig, group="player")
     register_defaults("human_vs_machine_defaults", HumanVsMachineConfig)
     with initialize_config_dir(config_dir=CONF_DIR, version_base="1.3"):
         yield
@@ -376,6 +378,12 @@ def test_each_side_can_switch_player_type_from_the_command_line() -> None:
 
     assert config.white == UciPlayerConfig(engine_path="lc0", elo=None)
     assert config.black == ZeroStylePlayerConfig()
+
+
+def test_random_player_can_be_picked_for_either_side() -> None:
+    config = compose_engine_vs_engine(["player@black=random"])
+
+    assert config == EngineVsEngineConfig(white=ZeroStylePlayerConfig(), black=RandomPlayerConfig())
 
 
 def test_network_can_play_a_different_checkpoint_of_itself() -> None:

@@ -9,6 +9,7 @@ from omegaconf import DictConfig
 from zero_style_chess_engine.config import (
     EngineVsEngineConfig,
     HeuristicMctsPlayerConfig,
+    RandomPlayerConfig,
     UciPlayerConfig,
     ZeroStylePlayerConfig,
     check_paths_exist,
@@ -23,6 +24,7 @@ register_defaults("engine_vs_engine_defaults", EngineVsEngineConfig)
 register_defaults("zero_style", ZeroStylePlayerConfig, group="player")
 register_defaults("heuristic_mcts", HeuristicMctsPlayerConfig, group="player")
 register_defaults("uci", UciPlayerConfig, group="player")
+register_defaults("random", RandomPlayerConfig, group="player")
 
 
 @hydra.main(version_base="1.3", config_path="../conf", config_name="engine_vs_engine")
