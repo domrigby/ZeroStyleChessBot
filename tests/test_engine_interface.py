@@ -106,6 +106,23 @@ def test_search_progress_is_reported_in_chunks_ending_with_the_full_search() -> 
     assert all(summary.fen == start_fen for summary in summaries)
 
 
+def test_timed_search_runs_for_the_move_time_whatever_the_rollout_limit() -> None:
+    engine = _engine_with_instant_evaluator(rollouts=1)  # Ignored once move_time is set
+    engine.move_time = 0.3
+    summaries: List[SearchSummary] = []
+
+    move, _ = engine.get_engine_move(on_progress=summaries.append)
+
+    final = summaries[-1]
+    assert chess.Move.from_uci(move) in chess.Board(KINGS_ONLY_FEN).legal_moves
+    assert 0.3 <= final.elapsed_seconds < 0.3 + 0.2  # Overshoots by at most one small chunk
+    assert final.rollouts_this_search > 1
+    # Progress keeps arriving about every progress_interval rollouts, as in a search by rollouts
+    reported = [summary.rollouts_this_search for summary in summaries[:-1]]
+    assert all(b - a >= engine.progress_interval for a, b in zip([0] + reported, reported))
+    assert all(b - a < engine.progress_interval + engine.timed_chunk for a, b in zip([0] + reported, reported))
+
+
 def test_stop_pondering_interrupts_a_long_ponder() -> None:
     engine = _engine_with_instant_evaluator(rollouts=1)
     engine.get_engine_move()

@@ -19,7 +19,11 @@ class EngineInterface:
     progress_interval = 100
     # Rollouts between checks for a request to stop pondering: the user's move waits for up to one chunk
     ponder_chunk = 128
+    # Rollouts between clock checks in a timed search: a move overshoots its time by up to one chunk
+    timed_chunk = 16
     _ponder_thread: Optional[threading.Thread] = None
+    # Seconds per move; when set, the search runs for this long instead of a fixed number of rollouts
+    move_time: Optional[float] = None
 
     def __init__(
         self,
@@ -28,12 +32,14 @@ class EngineInterface:
         move_selection: MoveSelection = "visits",
         value_function: Optional[HeuristicValue] = None,
         c_puct: Optional[float] = None,
+        move_time: Optional[float] = None,
     ) -> None:
         """
         :param network_path: weights to search with: positions are evaluated by the network, in an evaluator process
         :param value_function: instead of a network, search with uniform priors and this hand-written value function,
             answered in this process (a baseline player). Give exactly one of network_path and value_function
         :param c_puct: PUCT exploration constant; None keeps training's (search.c_puct)
+        :param move_time: seconds to search each move, in place of num_rollouts; None searches num_rollouts
         """
         if (network_path is None) == (value_function is None):
             raise ValueError("Give exactly one of network_path and value_function")
@@ -81,6 +87,7 @@ class EngineInterface:
         self.mcts.reset(start_state=self.current_board.fen())
         self.rollouts = num_rollouts
         self.move_selection: MoveSelection = move_selection
+        self.move_time = move_time
 
         if self.evaluator is not None:
             self.evaluator.start()
@@ -164,18 +171,28 @@ class EngineInterface:
 
     def get_engine_move(self, on_progress: Optional[Callable[[SearchSummary], None]] = None) -> Tuple[str, str]:
         """
-        Perform a search using the specified number of rollouts and return the engine move and new FEN.
+        Search for move_time seconds if set, otherwise for the set number of rollouts, and return the engine move and
+        new FEN.
         :param on_progress: called from this thread every progress_interval rollouts, and once at the end of the search
         """
         start_time = time.perf_counter()
         rollouts_done = 0
-        while rollouts_done < self.rollouts and not self.mcts.stop_event.is_set():
+        last_reported = 0
+        while not self.mcts.stop_event.is_set():
             # Chunked searches run the same rollouts as one search: the tree carries everything between them
-            chunk = min(self.progress_interval, self.rollouts - rollouts_done)
+            if self.move_time is not None:
+                chunk = self.timed_chunk
+            else:
+                chunk = min(self.progress_interval, self.rollouts - rollouts_done)
             self.mcts.search(chunk)
             rollouts_done += chunk
-            if on_progress is not None:
-                on_progress(summarise_search(self.mcts.root, rollouts_done, time.perf_counter() - start_time))
+            elapsed = time.perf_counter() - start_time
+            finished = elapsed >= self.move_time if self.move_time is not None else rollouts_done >= self.rollouts
+            if on_progress is not None and (finished or rollouts_done - last_reported >= self.progress_interval):
+                on_progress(summarise_search(self.mcts.root, rollouts_done, elapsed))
+                last_reported = rollouts_done
+            if finished:
+                break
 
         node, move, move_idx = self.mcts.select_greedy(self.move_selection)
         print(

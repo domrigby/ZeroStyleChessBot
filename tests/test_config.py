@@ -466,3 +466,13 @@ def test_heuristic_pesto_preset_is_a_heuristic_mcts_player_with_the_pesto_value(
 
     assert config.white == HeuristicMctsPlayerConfig(value_function="pesto", num_rollouts=2000, c_puct=3.0)
     assert config.black == HeuristicMctsPlayerConfig(value_function="pesto", num_rollouts=2000, c_puct=1.5)
+
+
+def test_match_move_time_is_unset_by_default_and_set_from_the_command_line() -> None:
+    assert compose_engine_vs_engine(["black.engine_path=stockfish"]).move_time is None
+
+    config = compose_engine_vs_engine(["black.engine_path=stockfish", "move_time=2.5"])
+
+    assert config.move_time == 2.5
+    with pytest.raises(ValidationError, match="move_time"):
+        compose_engine_vs_engine(["black.engine_path=stockfish", "move_time=0"])

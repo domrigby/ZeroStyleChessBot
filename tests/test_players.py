@@ -1,13 +1,13 @@
 import random
 import shutil
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import chess
 import chess.engine
 import pytest
 
 from tests.test_engine_interface import KINGS_ONLY_FEN, _engine_with_instant_evaluator
-from zero_style_chess_engine.config import RandomPlayerConfig, UciPlayerConfig
+from zero_style_chess_engine.config import HeuristicMctsPlayerConfig, RandomPlayerConfig, UciPlayerConfig
 from zero_style_chess_engine.players import (
     GameResult,
     IllegalMoveError,
@@ -229,6 +229,31 @@ def test_elo_cap_on_an_engine_without_uci_elo_says_to_pass_elo_null(monkeypatch:
     with pytest.raises(ValueError, match=r"black\.elo=null"):
         UciPlayer(UciPlayerConfig(engine_path="lc0", elo=1800), name="black")
     assert fake.quit_called
+
+
+@pytest.mark.parametrize(
+    "match_move_time, expected", [pytest.param(None, 2.5, id="own_time"), pytest.param(0.4, 0.4, id="match_time")]
+)
+def test_uci_player_thinks_for_the_match_move_time_when_one_is_set(
+    monkeypatch: pytest.MonkeyPatch, match_move_time: Optional[float], expected: float
+) -> None:
+    monkeypatch.setattr(chess.engine.SimpleEngine, "popen_uci", lambda path: _FakeUciEngine(options={}))
+
+    player = make_player(UciPlayerConfig(engine_path="sf", elo=None, move_time=2.5), "black", move_time=match_move_time)
+
+    assert isinstance(player, UciPlayer)
+    assert player.move_time == expected
+
+
+@pytest.mark.parametrize("match_move_time", [None, 0.4])
+def test_mcts_player_searches_for_the_match_move_time_when_one_is_set(match_move_time: Optional[float]) -> None:
+    player = make_player(HeuristicMctsPlayerConfig(num_rollouts=50), "white", move_time=match_move_time)
+    try:
+        assert isinstance(player, ZeroStylePlayer)
+        assert player.engine.move_time == match_move_time
+        assert player.engine.rollouts == 50
+    finally:
+        player.close()
 
 
 @pytest.mark.skipif(shutil.which("stockfish") is None, reason="Stockfish is not on $PATH")

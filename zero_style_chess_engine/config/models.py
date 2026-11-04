@@ -190,3 +190,9 @@ class EngineVsEngineConfig(_Config):
         True,
         description="Show an MCTS side's search: a side panel of statistics and arrows for the moves it is weighing",
     )
+    move_time: Optional[float] = Field(
+        None,
+        gt=0,
+        description="Seconds every side thinks per move, so the sides get equal time. Replaces the MCTS sides' "
+        "num_rollouts and the UCI sides' move_time; null keeps each side's own limit",
+    )

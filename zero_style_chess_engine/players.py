@@ -119,9 +119,10 @@ class ZeroStylePlayer:
 class UciPlayer:
     """Any UCI engine (Stockfish, Lc0, ...), run as a subprocess and given a fixed time per move"""
 
-    def __init__(self, config: UciPlayerConfig, name: str) -> None:
+    def __init__(self, config: UciPlayerConfig, name: str, move_time: Optional[float] = None) -> None:
+        """:param move_time: seconds per move in place of config.move_time; None keeps the config's"""
         self.name = name
-        self.move_time = config.move_time
+        self.move_time = config.move_time if move_time is None else move_time
         self.engine = chess.engine.SimpleEngine.popen_uci(config.engine_path)
         if config.elo is not None:
             if "UCI_Elo" not in self.engine.options:
@@ -157,16 +158,24 @@ class RandomPlayer:
 
 
 def make_player(
-    config: PlayerConfig, name: str, on_progress: Optional[Callable[[SearchSummary], None]] = None
+    config: PlayerConfig,
+    name: str,
+    on_progress: Optional[Callable[[SearchSummary], None]] = None,
+    move_time: Optional[float] = None,
 ) -> Player:
     """
     Build the player a config describes
     :param name: the side's name, e.g. "white"; used in error messages and command-line hints
     :param on_progress: search snapshots, for players that report them (the MCTS ones); ignored by the others
+    :param move_time: seconds per move for every player that searches, in place of its own limit (num_rollouts or
+        move_time); None keeps each player's own
     """
     if isinstance(config, ZeroStylePlayerConfig):
         engine = EngineInterface(
-            network_path=config.network_path, num_rollouts=config.num_rollouts, move_selection=config.move_selection
+            network_path=config.network_path,
+            num_rollouts=config.num_rollouts,
+            move_selection=config.move_selection,
+            move_time=move_time,
         )
         return ZeroStylePlayer(engine, name, on_progress)
     if isinstance(config, HeuristicMctsPlayerConfig):
@@ -175,8 +184,9 @@ def make_player(
             num_rollouts=config.num_rollouts,
             move_selection=config.move_selection,
             c_puct=config.c_puct,
+            move_time=move_time,
         )
         return ZeroStylePlayer(engine, name, on_progress)
     if isinstance(config, RandomPlayerConfig):
         return RandomPlayer(name)
-    return UciPlayer(config, name)
+    return UciPlayer(config, name, move_time)

@@ -87,8 +87,8 @@ def main(hydra_config: DictConfig) -> None:
     on_progress = show_search_progress if config.show_search else None
     players: List[Player] = []
     try:
-        players.append(make_player(config.white, "white", on_progress))
-        players.append(make_player(config.black, "black", on_progress))
+        players.append(make_player(config.white, "white", on_progress, config.move_time))
+        players.append(make_player(config.black, "black", on_progress, config.move_time))
     except Exception:
         for player in players:
             player.close()
