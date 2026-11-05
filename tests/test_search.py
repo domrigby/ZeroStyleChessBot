@@ -9,6 +9,7 @@ import pytest
 from zero_style_chess_engine.config import Backup, SearchConfig
 from zero_style_chess_engine.messages import EvalRequest, EvalResult
 from zero_style_chess_engine.mcts import MCTS, Node
+import chess_moves
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 # Back-rank mate: Ra8# is white's only mating move
@@ -270,6 +271,27 @@ def test_node_value_is_the_visit_weighted_mean_or_the_best_q(backup: Backup, exp
     tree.backpropagation([(tree.root, root_move), (child, taken)], observed_reward=-0.3)
 
     assert child.V == pytest.approx(expected_v)
+
+
+@pytest.mark.parametrize("backup", ["mean", "max"])
+@pytest.mark.parametrize("depth", [2, 4, 12])
+def test_a_leaf_value_is_discounted_once_per_ply_on_its_way_to_the_root(backup: Backup, depth: int) -> None:
+    tree, _ = _make_tree(START_FEN)
+    tree.search_config = SearchConfig(backup=backup)
+    # A line of fresh positions, each node's first move leading to the next
+    board = chess_moves.ChessEngine()
+    path: List[Tuple[Node, int]] = []
+    node = tree.root
+    for _ in range(depth):
+        path.append((node, 0))
+        node, _, _ = node.expand(0, board, node.state)
+
+    # The leaf is worth +1 to its side to move, so the move into it is worth -1 to the mover
+    tree.backpropagation(path, observed_reward=1.0)
+
+    # Each ply up flips the sign and discounts once more: the root's move is worth (-1)^depth * gamma^(depth - 1)
+    gamma = tree.search_config.gamma
+    assert tree.root.Qs[0] == pytest.approx((-1) ** depth * gamma ** (depth - 1))
 
 
 def test_search_defaults_to_mean_backup() -> None:

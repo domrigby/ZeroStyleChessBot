@@ -337,9 +337,9 @@ class MCTS:
         # it is in the state
         reward = -observed_reward
 
-        for idx, (node, move_idx) in enumerate(reversed(visited_moves)):
-            # Increment the visit count and update the total reward
-            new_Q = node.R + gamma_factor**idx * reward
+        for node, move_idx in reversed(visited_moves):
+            # reward already carries the discount for the plies below, so each ply up discounts once (below)
+            new_Q = node.R + reward
 
             # Running mean of the values backed up through this move
             node.backed_up[move_idx] += 1
@@ -351,11 +351,11 @@ class MCTS:
                 # Player will choose their best move... maximum Q
                 node.V = float(np.max(node.Qs[valued]))
                 # Only the best rewards propagate up the tree... otherwise player would not choose them
-                reward = -node.V
+                reward = -gamma_factor * node.V
             else:
                 # The average over every rollout through the node; the parent gets this rollout's own value
                 node.V = float(np.average(node.Qs[valued], weights=node.backed_up[valued]))
-                reward = -new_Q
+                reward = -gamma_factor * new_Q
 
             if self.full_rollout_virtual_loss and undo_v_loss:
                 # For full rollouts add one back on... some will have mutliple V losses at the same time
