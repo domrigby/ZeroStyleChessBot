@@ -50,8 +50,9 @@ Both accept the overrides above; `display_mode=analysis` on the default config d
 
 Step back through the game with ←/→ (Home/End for the start and the live position); the panel shows the engine's last
 search of the position you are viewing, and the engine keeps searching the live one meanwhile. You can only move on
-the live position. Analysis mode adds a graph of White's expected score, (1 + value) / 2, over the game; click it to
-jump to a move. `engine_vs_engine` has the same controls, with the graph whenever `show_search` is on.
+the live position. Analysis mode adds a graph of White's expected score, (1 + value) / 2, over the game, one line per
+side that searches, so two engines that disagree show as two lines; click it to jump to a move. `engine_vs_engine` has
+the same controls, with the graph whenever `show_search` is on.
 
 **Run a short training job on CPU:**
 ```bash

@@ -2,12 +2,12 @@
 
 Every position of the game is kept with the last search of it, so the viewer can step back through the game (arrow
 keys, Home/End, or a click on the graph) while the engines keep searching the live position. Analysis mode adds a graph
-of the expected score over the game.
+of the expected score over the game, one line per side that searches.
 """
 
 import math
 import threading
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import chess
 import pygame
@@ -28,6 +28,7 @@ GRAPH_BACKGROUND = (30, 30, 30)
 GRAPH_LINE = (230, 230, 230)
 GRAPH_MUTED = (100, 100, 100)
 GRAPH_MARKER = (230, 180, 60)
+SEARCHER_LINES = {chess.WHITE: (230, 230, 230), chess.BLACK: (90, 150, 255)}  # One line per side that searches
 
 Point = Tuple[float, float]
 Colour = Tuple[int, int, int]
@@ -42,12 +43,15 @@ def expected_score(summary: Optional[SearchSummary]) -> Optional[float]:
 
 
 class GameHistory:
-    """Every position of the game, each with the latest search of it. Written by game and search threads, read by the UI"""
+    """
+    Every position of the game, each with the latest search of it by each side that searched it (an engine searches
+    its own moves, and pondering ones the opponent's). Written by game and search threads, read by the UI
+    """
 
     def __init__(self, board: chess.Board) -> None:
         self._lock = threading.Lock()
         self._boards = [board.copy(stack=False)]
-        self._summaries: List[Optional[SearchSummary]] = [None]
+        self._summaries: List[Dict[chess.Color, SearchSummary]] = [{}]
 
     def __len__(self) -> int:
         with self._lock:
@@ -57,26 +61,37 @@ class GameHistory:
         """Add the position after a move"""
         with self._lock:
             self._boards.append(board.copy(stack=False))
-            self._summaries.append(None)
+            self._summaries.append({})
 
-    def record_search(self, summary: SearchSummary) -> None:
-        """Keep a search of the latest position; a search of any other position (a stale one) is ignored"""
+    def record_search(self, summary: SearchSummary, searcher: chess.Color) -> None:
+        """
+        Keep a search of the latest position; a search of any other position (a stale one) is ignored
+        :param searcher: the side whose engine ran the search, which needn't be the side to move
+        """
         with self._lock:
             # Placement and side to move only: the search's FEN and python-chess may differ on the other fields
             if summary.fen.split()[:2] == self._boards[-1].fen().split()[:2]:
-                self._summaries[-1] = summary
+                self._summaries[-1][searcher] = summary
 
     def board(self, ply: int) -> chess.Board:
         with self._lock:
             return self._boards[ply]
 
     def summary(self, ply: int) -> Optional[SearchSummary]:
+        """The search to show for a position: the side to move's, else the other side's (an engine pondering)"""
         with self._lock:
-            return self._summaries[ply]
+            searches = self._summaries[ply]
+            return searches.get(self._boards[ply].turn) or searches.get(not self._boards[ply].turn)
 
-    def expected_scores(self) -> List[Optional[float]]:
+    def searchers(self) -> List[chess.Color]:
+        """The sides that have searched any position so far, White first"""
         with self._lock:
-            return [expected_score(summary) for summary in self._summaries]
+            return [side for side in chess.COLORS if any(side in searches for searches in self._summaries)]
+
+    def expected_scores(self, searcher: chess.Color) -> List[Optional[float]]:
+        """White's expected score at every ply by one side's searches; None where that side didn't search"""
+        with self._lock:
+            return [expected_score(searches.get(searcher)) for searches in self._summaries]
 
 
 class Visualiser:
@@ -195,24 +210,33 @@ class Visualiser:
 
     def _draw_graph(self, rect: pygame.Rect) -> None:
         pygame.draw.rect(self.screen, GRAPH_BACKGROUND, rect)
-        self.screen.blit(self.small_font.render("Expected score (White)", True, GRAPH_LINE), (rect.x + 8, rect.y + 4))
+        title = self.small_font.render("Expected score (White) by", True, GRAPH_LINE)
+        self.screen.blit(title, (rect.x + 8, rect.y + 4))
         plot = self._plot_rect()
         pygame.draw.line(self.screen, GRAPH_MUTED, (plot.x, plot.centery), (plot.right, plot.centery))
 
-        scores = self.history.expected_scores()
-        last = len(scores) - 1
+        last = len(self.history) - 1
 
         def x_of(ply: int) -> float:
             return plot.x + plot.width * ply / max(last, 1)
 
-        # Plies with no search (a UCI side, or no pondering) are skipped: the line joins the searched ones
-        points = [
-            (x_of(ply), plot.bottom - score * plot.height) for ply, score in enumerate(scores) if score is not None
-        ]
-        if len(points) >= 2:
-            pygame.draw.lines(self.screen, GRAPH_LINE, False, points, 2)
-        for point in points:
-            pygame.draw.circle(self.screen, GRAPH_LINE, point, 2)
+        # Each side's own searches as one line, so two engines that disagree show as two lines rather than a zigzag.
+        # A side that never searches (UCI, random) has no line; plies a side didn't search are skipped
+        legend_x = rect.x + 8 + title.get_width() + 8
+        for searcher in self.history.searchers():
+            colour = SEARCHER_LINES[searcher]
+            label = self.small_font.render(chess.COLOR_NAMES[searcher].capitalize(), True, colour)
+            self.screen.blit(label, (legend_x, rect.y + 4))
+            legend_x += label.get_width() + 8
+
+            scores = self.history.expected_scores(searcher)[: last + 1]  # A move may have landed since len()
+            points = [
+                (x_of(ply), plot.bottom - score * plot.height) for ply, score in enumerate(scores) if score is not None
+            ]
+            if len(points) >= 2:
+                pygame.draw.lines(self.screen, colour, False, points, 2)
+            for point in points:
+                pygame.draw.circle(self.screen, colour, point, 2)
         marker_x = x_of(self.viewed_ply)
         pygame.draw.line(self.screen, GRAPH_MARKER, (marker_x, plot.y), (marker_x, plot.bottom), 1)
 

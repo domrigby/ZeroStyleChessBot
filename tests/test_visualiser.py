@@ -63,13 +63,43 @@ def test_expected_score_is_from_whites_point_of_view(
 
 def test_history_keeps_the_latest_search_of_the_latest_position_only() -> None:
     history = GameHistory(chess.Board())
-    history.record_search(_summary(chess.Board(), 0.2))
-    history.record_search(_summary(chess.Board(), 0.4))
+    history.record_search(_summary(chess.Board(), 0.2), chess.WHITE)
+    history.record_search(_summary(chess.Board(), 0.4), chess.WHITE)
     history.push(_after("e2e4"))
-    history.record_search(_summary(chess.Board(), 0.9))  # Stale: a search of the position before the move
+    history.record_search(_summary(chess.Board(), 0.9), chess.WHITE)  # Stale: a search of the position before the move
 
-    assert history.expected_scores() == [pytest.approx(0.7), None]
+    assert history.expected_scores(chess.WHITE) == [pytest.approx(0.7), None]
     assert history.summary(1) is None
+
+
+def test_history_keeps_each_sides_searches_apart() -> None:
+    history = GameHistory(chess.Board())
+    history.record_search(_summary(chess.Board(), 0.6), chess.WHITE)
+    history.push(_after("e2e4"))
+    history.record_search(_summary(_after("e2e4"), 0.6), chess.BLACK)  # Black thinks it is better
+
+    assert history.searchers() == [chess.WHITE, chess.BLACK]
+    assert history.expected_scores(chess.WHITE) == [pytest.approx(0.8), None]
+    assert history.expected_scores(chess.BLACK) == [None, pytest.approx(0.2)]
+
+
+def test_a_side_that_never_searches_has_no_line() -> None:
+    history = GameHistory(chess.Board())
+    history.push(_after("e2e4"))
+    history.record_search(_summary(_after("e2e4"), 0.1), chess.BLACK)
+
+    assert history.searchers() == [chess.BLACK]
+    assert history.expected_scores(chess.WHITE) == [None, None]
+
+
+def test_the_panel_prefers_the_side_to_moves_search_over_a_ponder() -> None:
+    history = GameHistory(chess.Board())
+    pondered, searched = _summary(chess.Board(), 0.3), _summary(chess.Board(), 0.5)
+    history.record_search(pondered, chess.BLACK)  # Black's engine pondering White's move
+    assert history.summary(0) is pondered
+
+    history.record_search(searched, chess.WHITE)
+    assert history.summary(0) is searched
 
 
 def test_history_copies_boards() -> None:
@@ -144,7 +174,8 @@ def test_square_at_inverts_square_center(visualiser: Visualiser) -> None:
 
 
 def test_draws_the_live_and_a_viewed_position(visualiser: Visualiser) -> None:
-    visualiser.history.record_search(_summary(visualiser.history.board(3), 0.1))
+    visualiser.history.record_search(_summary(visualiser.history.board(3), 0.1), chess.BLACK)
+    visualiser.history.record_search(_summary(visualiser.history.board(3), 0.2), chess.WHITE)
     live = visualiser.history.board(3)
 
     visualiser.draw(live, None, [(chess.G1, chess.F3, (255, 0, 0))], show_candidates=True)

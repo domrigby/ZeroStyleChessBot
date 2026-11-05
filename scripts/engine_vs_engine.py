@@ -1,5 +1,5 @@
 import threading
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import pygame
 import chess
@@ -66,11 +66,15 @@ def main(hydra_config: DictConfig) -> None:
         config.show_search,
     )
 
-    # Shared by both sides: only the side to move searches, and on_move clears its summary once it has moved
-    def show_search_progress(summary: SearchSummary) -> None:
-        nonlocal search_summary
-        search_summary = summary
-        visualiser.history.record_search(summary)
+    # Shared by both sides: only the side to move searches, and on_move clears its summary once it has moved. Each side's
+    # searches are recorded as its own, so the graph shows each engine's view of the game
+    def search_progress_of(searcher: chess.Color) -> Callable[[SearchSummary], None]:
+        def show_search_progress(summary: SearchSummary) -> None:
+            nonlocal search_summary
+            search_summary = summary
+            visualiser.history.record_search(summary, searcher)
+
+        return show_search_progress
 
     def on_move(new_board: chess.Board) -> None:
         nonlocal board, arrows, search_summary
@@ -84,11 +88,13 @@ def main(hydra_config: DictConfig) -> None:
         board = new_board
 
     # ---- Players ----
-    on_progress = show_search_progress if config.show_search else None
+    def on_progress(side: chess.Color) -> Optional[Callable[[SearchSummary], None]]:
+        return search_progress_of(side) if config.show_search else None
+
     players: List[Player] = []
     try:
-        players.append(make_player(config.white, "white", on_progress, config.move_time))
-        players.append(make_player(config.black, "black", on_progress, config.move_time))
+        players.append(make_player(config.white, "white", on_progress(chess.WHITE), config.move_time))
+        players.append(make_player(config.black, "black", on_progress(chess.BLACK), config.move_time))
     except Exception:
         for player in players:
             player.close()

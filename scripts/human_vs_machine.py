@@ -38,6 +38,7 @@ def main(hydra_config: DictConfig) -> None:
     # Colors
     ARROW_COLOR = (255, 0, 0)
     ENGINE_ARROW_COLOR = (0, 0, 255)
+    ENGINE_SIDE = chess.BLACK  # The human moves first
     BUTTON_COLOR = (70, 130, 180)
     BUTTON_TEXT_COLOR = (255, 255, 255)
     THINKING_COLOR = (255, 0, 0)
@@ -139,7 +140,7 @@ def main(hydra_config: DictConfig) -> None:
     def show_search_progress(summary: SearchSummary) -> None:
         nonlocal search_summary
         search_summary = summary
-        visualiser.history.record_search(summary)
+        visualiser.history.record_search(summary, ENGINE_SIDE)
 
     def show_ponder_progress(summary: SearchSummary) -> None:
         nonlocal ponder_summary
@@ -147,7 +148,7 @@ def main(hydra_config: DictConfig) -> None:
             # The moves searched are the human's candidates: showing them would be a hint
             summary = dataclasses.replace(summary, candidates=[], principal_variation=[])
         ponder_summary = summary
-        visualiser.history.record_search(summary)
+        visualiser.history.record_search(summary, ENGINE_SIDE)
 
     def start_pondering() -> None:
         if config.ponder:
