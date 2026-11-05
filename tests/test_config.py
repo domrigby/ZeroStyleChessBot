@@ -54,6 +54,7 @@ EXPECTED_TRAINING_DEFAULTS: Dict[str, Any] = {
     "search": {
         "c_puct": 3.0,
         "gamma": 0.99,
+        "backup": "mean",
         "dirichlet_alpha": 1.0,
         "dirichlet_epsilon": 0.25,
         "max_game_length": 300,

@@ -6,6 +6,7 @@ from typing import Any, Iterator, List, Tuple, cast
 import numpy as np
 import pytest
 
+from zero_style_chess_engine.config import Backup, SearchConfig
 from zero_style_chess_engine.messages import EvalRequest, EvalResult
 from zero_style_chess_engine.mcts import MCTS, Node
 
@@ -210,6 +211,69 @@ def test_q_averages_only_backed_up_values_while_other_visits_are_in_flight() -> 
 
     tree.backpropagation([(root, move_idx)], observed_reward=-0.2)
     assert root.Qs[move_idx] == pytest.approx(0.4)
+
+
+def test_a_move_still_being_evaluated_does_not_count_towards_the_value_of_its_position() -> None:
+    tree, _ = _make_tree(START_FEN)
+    root, losing, in_flight = tree.root, 0, 1
+    root.Ns[losing] += 1
+    root.Ns[in_flight] += 1  # Its evaluation hasn't come back: Q is still the initial 0
+
+    tree.backpropagation([(root, losing)], observed_reward=0.5)
+
+    assert root.V == pytest.approx(-0.5)
+
+
+def _root_and_child_with_a_strong_reply(backup: Backup) -> Tuple[MCTS, int, Node, int]:
+    """A root move whose child position has one well-tested strong move, plus the child's move a rollout now takes"""
+    tree, _ = _make_tree(START_FEN)
+    tree.search_config = SearchConfig(backup=backup)
+    tree.search(number_of_expansions=NUM_ROLLOUTS)
+    _drain(tree)
+    root = tree.root
+    root_move = next(idx for idx, child in root.child_nodes.items() if child.number_legal_moves > 1)
+    child = root.child_nodes[root_move]
+    strong, taken = 0, 1
+    for node, idx in [(root, root_move), (child, strong), (child, taken)]:
+        node.Ns[idx] = node.backed_up[idx] = node.Qs[idx] = 0
+    child.Ns[:] = child.backed_up[:] = 0
+    child.Ns[strong] = child.backed_up[strong] = 3
+    child.Qs[strong] = 0.9
+    root.Ns[root_move] += 1
+    child.Ns[taken] += 1
+    return tree, root_move, child, taken
+
+
+@pytest.mark.parametrize(
+    "backup, expected_root_q",
+    [
+        pytest.param("mean", -0.3, id="mean_passes_up_the_rollouts_own_value"),
+        pytest.param("max", -0.9, id="max_passes_up_the_best_moves_q"),
+    ],
+)
+def test_backup_mode_decides_what_a_node_passes_to_its_parent(backup: Backup, expected_root_q: float) -> None:
+    tree, root_move, child, taken = _root_and_child_with_a_strong_reply(backup)
+
+    # The rollout through the child's weaker move comes back at 0.3 for the child's mover
+    tree.backpropagation([(tree.root, root_move), (child, taken)], observed_reward=-0.3)
+
+    assert child.Qs[taken] == pytest.approx(0.3)
+    assert tree.root.Qs[root_move] == pytest.approx(tree.search_config.gamma * expected_root_q)
+
+
+@pytest.mark.parametrize(
+    "backup, expected_v", [pytest.param("mean", (3 * 0.9 + 0.3) / 4, id="mean"), pytest.param("max", 0.9, id="max")]
+)
+def test_node_value_is_the_visit_weighted_mean_or_the_best_q(backup: Backup, expected_v: float) -> None:
+    tree, root_move, child, taken = _root_and_child_with_a_strong_reply(backup)
+
+    tree.backpropagation([(tree.root, root_move), (child, taken)], observed_reward=-0.3)
+
+    assert child.V == pytest.approx(expected_v)
+
+
+def test_search_defaults_to_mean_backup() -> None:
+    assert SearchConfig().backup == "mean"
 
 
 def _root_where_most_visited_and_highest_q_differ() -> Tuple[MCTS, int, int]:

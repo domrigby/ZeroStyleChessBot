@@ -345,12 +345,17 @@ class MCTS:
             node.backed_up[move_idx] += 1
             node.Qs[move_idx] += (new_Q - node.Qs[move_idx]) / node.backed_up[move_idx]
 
-            # Player will choose their best move... maximum Q
-            Qs = node.Qs[node.Ns > 0]
-            node.V = np.max(Qs)
-
-            # Only the best rewards propagate up the tree... otherwise player would not choose them
-            reward = -float(node.V)
+            # The node's value, over moves with a value: a move whose only visits are still being evaluated has none yet
+            valued = node.backed_up > 0
+            if self.search_config.backup == "max":
+                # Player will choose their best move... maximum Q
+                node.V = float(np.max(node.Qs[valued]))
+                # Only the best rewards propagate up the tree... otherwise player would not choose them
+                reward = -node.V
+            else:
+                # The average over every rollout through the node; the parent gets this rollout's own value
+                node.V = float(np.average(node.Qs[valued], weights=node.backed_up[valued]))
+                reward = -new_Q
 
             if self.full_rollout_virtual_loss and undo_v_loss:
                 # For full rollouts add one back on... some will have mutliple V losses at the same time

@@ -19,6 +19,10 @@ DisplayMode = Literal["play", "analysis"]
 # (material balance, P=1 N=B=3 R=5 Q=9) or "pesto" (PeSTO's piece-square evaluation once the captures settle)
 HeuristicValue = Literal["zero", "material", "pesto"]
 
+# What a node passes up the tree after a rollout: "mean" (that rollout's value, so a node's value is the average over its
+# rollouts, as in AlphaZero) or "max" (its best move's Q, minimax-style: optimistic for the side to move)
+Backup = Literal["mean", "max"]
+
 
 class _Config(BaseModel):
     # extra="forbid": a misspelt key (search.cpuct=1) fails at startup instead of being ignored
@@ -31,6 +35,11 @@ class SearchConfig(_Config):
     c_puct: float = Field(3.0, gt=0, description="PUCT exploration constant")
     gamma: float = Field(
         0.99, gt=0, le=1, description="Discount applied per ply when backing values up the search tree"
+    )
+    backup: Backup = Field(
+        "mean",
+        description="Value each node passes to its parent: 'mean' (the rollout's own value, as in AlphaZero) or 'max' "
+        "(its best move's Q)",
     )
     dirichlet_alpha: float = Field(
         1.0, gt=0, description="Dirichlet noise concentration added to the priors in self-play"

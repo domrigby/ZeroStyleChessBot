@@ -2,6 +2,7 @@
 
 from zero_style_chess_engine.config.hydra import check_paths_exist, from_hydra, register_defaults
 from zero_style_chess_engine.config.models import (
+    Backup,
     DisplayMode,
     EngineVsEngineConfig,
     HeuristicMctsPlayerConfig,
@@ -18,6 +19,7 @@ from zero_style_chess_engine.config.models import (
 )
 
 __all__ = [
+    "Backup",
     "DisplayMode",
     "EngineVsEngineConfig",
     "HeuristicMctsPlayerConfig",
