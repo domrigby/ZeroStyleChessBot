@@ -56,6 +56,20 @@ def test_values_report_the_network_and_the_search_separately() -> None:
     assert summary.search_value is not None and summary.search_value > 0.9
 
 
+def test_search_value_is_the_q_of_the_most_visited_move_with_a_value() -> None:
+    tree, _ = _searched_summary(START_FEN)
+    root = tree.root
+    well_tested, long_shot, in_flight = sorted(root.child_nodes)[:3]
+    root.Ns[:], root.backed_up[:], root.Qs[:] = 0, 0, 0.0
+    root.Ns[well_tested], root.backed_up[well_tested], root.Qs[well_tested] = 150, 150, -0.2
+    root.Ns[long_shot], root.backed_up[long_shot], root.Qs[long_shot] = 2, 2, 0.9  # Lucky, not the search's view
+    root.Ns[in_flight] = 300  # Every visit still being evaluated: no value yet, however many visits
+
+    summary = summarise_search(root, rollouts_this_search=NUM_ROLLOUTS, elapsed_seconds=1.0)
+
+    assert summary.search_value == -0.2
+
+
 def test_unsearched_root_has_no_candidates_or_values() -> None:
     tree, _ = _make_tree(START_FEN)
 

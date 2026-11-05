@@ -30,7 +30,7 @@ class SearchSummary:
     candidates: List[CandidateMove]  # Most visited first
     principal_variation: List[str]  # Most visited line from the root
     net_value: Optional[float]  # The network's value of the root, before any search
-    search_value: Optional[float]  # Best Q among visited root moves
+    search_value: Optional[float]  # Q of the most visited root move with a value backed up
     tree_size: int
     max_depth: int
 
@@ -57,7 +57,10 @@ def summarise_search(root: Node, rollouts_this_search: int, elapsed_seconds: flo
         for idx in order
         if root.Ns[idx] > 0
     ]
-    visited = root.Ns > 0
+    # The most visited move's Q rests on most of the search; the best Q is often a move's lucky few visits, which
+    # flatters whoever is to move
+    valued = np.flatnonzero(root.backed_up > 0)
+    search_value = float(root.Qs[valued[np.argmax(root.Ns[valued])]]) if valued.size else None
     tree_size, max_depth = _tree_size_and_depth(root)
 
     return SearchSummary(
@@ -68,7 +71,7 @@ def summarise_search(root: Node, rollouts_this_search: int, elapsed_seconds: flo
         candidates=candidates,
         principal_variation=_principal_variation(root),
         net_value=root.net_value,
-        search_value=float(root.Qs[visited].max()) if visited.any() else None,
+        search_value=search_value,
         tree_size=tree_size,
         max_depth=max_depth,
     )
